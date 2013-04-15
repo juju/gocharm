@@ -9,6 +9,8 @@ import (
 
 	"launchpad.net/juju-core/environs"
 	_ "launchpad.net/juju-core/environs/ec2"
+	_ "launchpad.net/juju-core/environs/maas"
+	_ "launchpad.net/juju-core/environs/openstack"
 	"launchpad.net/juju-core/juju"
 	"launchpad.net/juju-core/log"
 	"launchpad.net/juju-core/state/api"
