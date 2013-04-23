@@ -8,49 +8,26 @@ import (
 	"fmt"
 	"launchpad.net/juju-core/worker/uniter/jujuc"
 	"log"
-	"net/rpc"
-	"os"
 	"strings"
-	"sync"
 )
 
-// Variables valid for all hooks
-var (
-	EnvUUID  = os.Getenv("JUJU_ENV_UUID")
-	Unit     = os.Getenv("JUJU_UNIT_NAME")
-	CharmDir = os.Getenv("CHARM_DIR")
-)
-
-// Variables valid for relation-related hooks.
-var (
-	RelationName = os.Getenv("JUJU_RELATION")
-	RelationId   = os.Getenv("JUJU_RELATION_ID")
-	RemoteUnit   = os.Getenv("JUJU_REMOTE_UNIT")
-)
-
-var (
-	dialJujucOnce  sync.Once
-	jujucClient    *rpc.Client
-	jujucContextId = os.Getenv("JUJU_CONTEXT_ID")
-)
-
-func IsRelationHook() bool {
-	return RelationName != ""
+func (ctxt *Context) IsRelationHook() bool {
+	return ctxt.RelationName != ""
 }
 
-func OpenPort(proto string, port int) error {
-	_, err := run("open-port", fmt.Sprintf("%d/%s", port, proto))
+func (ctxt *Context) OpenPort(proto string, port int) error {
+	_, err := ctxt.run("open-port", fmt.Sprintf("%d/%s", port, proto))
 	return err
 }
 
-func ClosePort(proto string, port int) error {
-	_, err := run("close-port", fmt.Sprintf("%d/%s", port, proto))
+func (ctxt *Context) ClosePort(proto string, port int) error {
+	_, err := ctxt.run("close-port", fmt.Sprintf("%d/%s", port, proto))
 	return err
 }
 
 // PrivateAddress returns the public address of the local unit.
-func PublicAddress() (string, error) {
-	out, err := run("unit-get", "public-address")
+func (ctxt *Context) PublicAddress() (string, error) {
+	out, err := ctxt.run("unit-get", "public-address")
 	if err != nil {
 		return "", err
 	}
@@ -58,8 +35,8 @@ func PublicAddress() (string, error) {
 }
 
 // PrivateAddress returns the private address of the local unit.
-func PrivateAddress() (string, error) {
-	out, err := run("unit-get", "private-address")
+func (ctxt *Context) PrivateAddress() (string, error) {
+	out, err := ctxt.run("unit-get", "private-address")
 	if err != nil {
 		return "", err
 	}
@@ -67,24 +44,24 @@ func PrivateAddress() (string, error) {
 }
 
 // Log logs a message through the juju logging facility.
-func Log(msg string) error {
-	_, err := run("juju-log", msg)
+func (ctxt *Context) Log(msg string) error {
+	_, err := ctxt.run("juju-log", msg)
 	return err
 }
 
 // GetRelation returns the value with the given key from the
 // relation and unit that triggered the hook execution.
 // It is equivalent to GetRelationUnit(key, RelationId, RemoteUnit).
-func GetRelation(key string) (string, error) {
-	return GetRelationUnit(key, RelationId, RemoteUnit)
+func (ctxt *Context) GetRelation(key string) (string, error) {
+	return ctxt.GetRelationUnit(key, ctxt.RelationId, ctxt.RemoteUnit)
 }
 
 // GetRelationUnit returns the value with the given key
 // from the given unit associated with the relation with the
 // given id.
-func GetRelationUnit(key string, relationId, unit string) (string, error) {
+func (ctxt *Context) GetRelationUnit(key string, relationId, unit string) (string, error) {
 	var val string
-	if err := runJson(&val, "relation-get", "--format", "json", "-r", relationId, "--", key, unit); err != nil {
+	if err := ctxt.runJson(&val, "relation-get", "--format", "json", "-r", relationId, "--", key, unit); err != nil {
 		return "", err
 	}
 	return val, nil
@@ -93,15 +70,15 @@ func GetRelationUnit(key string, relationId, unit string) (string, error) {
 // GetAllRelation returns all the settings for the relation
 // and unit that triggered the hook execution.
 // It is equivalent to GetAllRelationUnit(RelationId, RemoteUnit).
-func GetAllRelation() (map[string]string, error) {
-	return GetAllRelationUnit(RelationId, RemoteUnit)
+func (ctxt *Context) GetAllRelation() (map[string]string, error) {
+	return ctxt.GetAllRelationUnit(ctxt.RelationId, ctxt.RemoteUnit)
 }
 
 // GetAllRelationUnit returns all the settings from the given unit associated
 // with the relation with the given id.
-func GetAllRelationUnit(relationId, unit string) (map[string]string, error) {
+func (ctxt *Context) GetAllRelationUnit(relationId, unit string) (map[string]string, error) {
 	var val map[string]string
-	if err := runJson(&val, "relation-get", "-r", relationId, "--format", "json", "--", "-", unit); err != nil {
+	if err := ctxt.runJson(&val, "relation-get", "-r", relationId, "--format", "json", "--", "-", unit); err != nil {
 		return nil, err
 	}
 	return val, nil
@@ -109,17 +86,17 @@ func GetAllRelationUnit(relationId, unit string) (map[string]string, error) {
 
 // RelationIds returns all the relation ids associated
 // with the relation with the given name,
-func RelationIds(relationName string) ([]string, error) {
+func (ctxt *Context) RelationIds(relationName string) ([]string, error) {
 	var val []string
-	if err := runJson(&val, "relation-ids", "--format", "json", "--", relationName); err != nil {
+	if err := ctxt.runJson(&val, "relation-ids", "--format", "json", "--", relationName); err != nil {
 		return nil, err
 	}
 	return val, nil
 }
 
-func RelationUnits(relationId string) ([]string, error) {
+func (ctxt *Context) RelationUnits(relationId string) ([]string, error) {
 	var val []string
-	if err := runJson(&val, "relation-list", "--format", "json", "--", relationId); err != nil {
+	if err := ctxt.runJson(&val, "relation-list", "--format", "json", "--", relationId); err != nil {
 		return nil, err
 	}
 	return val, nil
@@ -128,14 +105,14 @@ func RelationUnits(relationId string) ([]string, error) {
 // AllRelationUnits returns a map from all the relation ids
 // for the relation with the given name to all the
 // units with that name
-func AllRelationUnits(relationName string) (map[string][]string, error) {
+func (ctxt *Context) AllRelationUnits(relationName string) (map[string][]string, error) {
 	allUnits := make(map[string][]string)
-	ids, err := RelationIds(relationName)
+	ids, err := ctxt.RelationIds(relationName)
 	if err != nil {
 		return nil, fmt.Errorf("cannot get relation ids: %v", err)
 	}
 	for _, id := range ids {
-		units, err := RelationUnits(id)
+		units, err := ctxt.RelationUnits(id)
 		if err != nil {
 			return nil, fmt.Errorf("cannot get relation units for id %q: %v", id, err)
 		}
@@ -145,13 +122,13 @@ func AllRelationUnits(relationName string) (map[string][]string, error) {
 }
 
 // SetRelation sets the given key-value pairs on the current relation instance.
-func SetRelation(keyvals ...string) error {
-	return SetRelationWithId(RelationId, keyvals...)
+func (ctxt *Context) SetRelation(keyvals ...string) error {
+	return ctxt.SetRelationWithId(ctxt.RelationId, keyvals...)
 }
 
 // SetRelationWithId sets the given key-value pairs
 // on the relation with the given id.
-func SetRelationWithId(relationId string, keyvals ...string) error {
+func (ctxt *Context) SetRelationWithId(relationId string, keyvals ...string) error {
 	if len(keyvals)%2 != 0 {
 		return fmt.Errorf("invalid key/value count")
 	}
@@ -163,42 +140,29 @@ func SetRelationWithId(relationId string, keyvals ...string) error {
 	for i := 0; i < len(keyvals); i += 2 {
 		args = append(args, fmt.Sprintf("%s=%s", keyvals[i], keyvals[i+1]))
 	}
-	_, err := run("relation-set", args...)
+	_, err := ctxt.run("relation-set", args...)
 	return err
 }
 
-func GetConfig(key string) (interface{}, error) {
+func (ctxt *Context) GetConfig(key string) (interface{}, error) {
 	var val interface{}
-	if err := runJson(&val, "config-get", "--format", "json", "--", key); err != nil {
+	if err := ctxt.runJson(&val, "config-get", "--format", "json", "--", key); err != nil {
 		return nil, err
 	}
 	return val, nil
 }
 
-func GetAllConfig() (map[string]interface{}, error) {
+func (ctxt *Context) GetAllConfig() (map[string]interface{}, error) {
 	var val map[string]interface{}
-	if err := runJson(&val, "config-get", "--format", "json"); err != nil {
+	if err := ctxt.runJson(&val, "config-get", "--format", "json"); err != nil {
 		return nil, err
 	}
 	return val, nil
 }
 
-func dialJujuc() {
-	socketPath := os.Getenv("JUJU_AGENT_SOCKET")
-	if socketPath == "" || jujucContextId == "" {
-		panic("launchpad.net/juju-utils/hook used in non-hook context")
-	}
-	client, err := rpc.Dial("unix", socketPath)
-	if err != nil {
-		panic(fmt.Errorf("cannot dial uniter: %v", err))
-	}
-	jujucClient = client
-}
-
-func run(cmd string, args ...string) (stdout []byte, err error) {
-	dialJujucOnce.Do(dialJujuc)
+func (ctxt *Context) run(cmd string, args ...string) (stdout []byte, err error) {
 	req := jujuc.Request{
-		ContextId: jujucContextId,
+		ContextId: ctxt.jujucContextId,
 		// We will never use a command that uses a path name,
 		// but jujuc checks for an absolute path.
 		Dir:         "/",
@@ -207,7 +171,7 @@ func run(cmd string, args ...string) (stdout []byte, err error) {
 	}
 	log.Printf("run req %#v", req)
 	var resp jujuc.Response
-	err = jujucClient.Call("Jujuc.Main", req, &resp)
+	err = ctxt.jujucClient.Call("Jujuc.Main", req, &resp)
 	if err != nil {
 		return nil, fmt.Errorf("cannot call jujuc.Main: %v", err)
 	}
@@ -221,8 +185,8 @@ func run(cmd string, args ...string) (stdout []byte, err error) {
 	return nil, errors.New(errText)
 }
 
-func runJson(dst interface{}, cmd string, args ...string) error {
-	out, err := run(cmd, args...)
+func (ctxt *Context) runJson(dst interface{}, cmd string, args ...string) error {
+	out, err := ctxt.run(cmd, args...)
 	if err != nil {
 		return err
 	}
