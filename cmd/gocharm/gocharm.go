@@ -50,7 +50,7 @@ func main() {
 }
 
 func compileDir(dir *charm.Dir) (doneSomething bool, err error) {
-	if info, err := os.Stat(filepath.Join(dir.Path, "src")); err != nil || !info.IsDir() {
+	if info, err := os.Stat(filepath.Join(dir.Path, "src/hooks")); err != nil || !info.IsDir() {
 		return false, nil
 	}
 	defer os.RemoveAll(filepath.Join(dir.Path, "pkg"))
@@ -60,7 +60,7 @@ func compileDir(dir *charm.Dir) (doneSomething bool, err error) {
 		if err := run(env, "go", "test", "-i", "./..."); err != nil {
 			return false, err
 		}
-		if err := run(env, "go", "test", "./..."); err != nil {
+		if err := run(env, "go", "test", "./hooks"); err != nil {
 			return false, err
 		}
 	}
