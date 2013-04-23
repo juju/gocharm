@@ -44,8 +44,8 @@ func (ctxt *Context) PrivateAddress() (string, error) {
 }
 
 // Log logs a message through the juju logging facility.
-func (ctxt *Context) Log(msg string) error {
-	_, err := ctxt.run("juju-log", msg)
+func (ctxt *Context) Logf(f string, a ...interface{}) error {
+	_, err := ctxt.run("juju-log", fmt.Sprintf(f, a...))
 	return err
 }
 
