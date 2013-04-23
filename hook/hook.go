@@ -1,11 +1,13 @@
 // The hook package provides a Go interface to the
 // charm hook commands.
 package hook
+
 import (
 	"encoding/json"
 	"errors"
 	"fmt"
 	"launchpad.net/juju-core/worker/uniter/jujuc"
+	"log"
 	"net/rpc"
 	"os"
 	"strings"
@@ -14,21 +16,21 @@ import (
 
 // Variables valid for all hooks
 var (
-	EnvUUID = os.Getenv("JUJU_ENV_UUID")
-	Unit = os.Getenv("JUJU_UNIT_NAME")
+	EnvUUID  = os.Getenv("JUJU_ENV_UUID")
+	Unit     = os.Getenv("JUJU_UNIT_NAME")
 	CharmDir = os.Getenv("CHARM_DIR")
 )
 
 // Variables valid for relation-related hooks.
 var (
 	RelationName = os.Getenv("JUJU_RELATION")
-	RelationId = os.Getenv("JUJU_RELATION_ID")
-	RemoteUnit = os.Getenv("JUJU_REMOTE_UNIT")
+	RelationId   = os.Getenv("JUJU_RELATION_ID")
+	RemoteUnit   = os.Getenv("JUJU_REMOTE_UNIT")
 )
 
 var (
-	dialJujucOnce sync.Once
-	jujucClient *rpc.Client
+	dialJujucOnce  sync.Once
+	jujucClient    *rpc.Client
 	jujucContextId = os.Getenv("JUJU_CONTEXT_ID")
 )
 
@@ -56,7 +58,7 @@ func PublicAddress() (string, error) {
 }
 
 // PrivateAddress returns the private address of the local unit.
-func PrivateAddress()  (string, error) {
+func PrivateAddress() (string, error) {
 	out, err := run("unit-get", "private-address")
 	if err != nil {
 		return "", err
@@ -82,7 +84,7 @@ func GetRelation(key string) (string, error) {
 // given id.
 func GetRelationUnit(key string, relationId, unit string) (string, error) {
 	var val string
-	if err := runJson(&val, "relation-get", "--format", "json", "--", key, unit); err != nil {
+	if err := runJson(&val, "relation-get", "--format", "json", "-r", relationId, "--", key, unit); err != nil {
 		return "", err
 	}
 	return val, nil
@@ -91,14 +93,14 @@ func GetRelationUnit(key string, relationId, unit string) (string, error) {
 // GetAllRelation returns all the settings for the relation
 // and unit that triggered the hook execution.
 // It is equivalent to GetAllRelationUnit(RelationId, RemoteUnit).
-func GetAllRelation() (map[string] string, error) {
+func GetAllRelation() (map[string]string, error) {
 	return GetAllRelationUnit(RelationId, RemoteUnit)
 }
 
 // GetAllRelationUnit returns all the settings from the given unit associated
 // with the relation with the given id.
-func GetAllRelationUnit(relationId, unit string) (map[string] string, error) {
-	var val map[string] string
+func GetAllRelationUnit(relationId, unit string) (map[string]string, error) {
+	var val map[string]string
 	if err := runJson(&val, "relation-get", "-r", relationId, "--format", "json", "--", "-", unit); err != nil {
 		return nil, err
 	}
@@ -126,8 +128,8 @@ func RelationUnits(relationId string) ([]string, error) {
 // AllRelationUnits returns a map from all the relation ids
 // for the relation with the given name to all the
 // units with that name
-func AllRelationUnits(relationName string) (map[string] []string, error) {
-	allUnits := make(map[string] []string)
+func AllRelationUnits(relationName string) (map[string][]string, error) {
+	allUnits := make(map[string][]string)
 	ids, err := RelationIds(relationName)
 	if err != nil {
 		return nil, fmt.Errorf("cannot get relation ids: %v", err)
@@ -150,8 +152,11 @@ func SetRelation(keyvals ...string) error {
 // SetRelationWithId sets the given key-value pairs
 // on the relation with the given id.
 func SetRelationWithId(relationId string, keyvals ...string) error {
-	if len(keyvals) % 2 != 0 {
+	if len(keyvals)%2 != 0 {
 		return fmt.Errorf("invalid key/value count")
+	}
+	if len(keyvals) == 0 {
+		return nil
 	}
 	args := make([]string, 0, 3+len(keyvals)/2)
 	args = append(args, "-r", relationId, "--")
@@ -193,13 +198,14 @@ func dialJujuc() {
 func run(cmd string, args ...string) (stdout []byte, err error) {
 	dialJujucOnce.Do(dialJujuc)
 	req := jujuc.Request{
-		ContextId:   jujucContextId,
+		ContextId: jujucContextId,
 		// We will never use a command that uses a path name,
 		// but jujuc checks for an absolute path.
 		Dir:         "/",
 		CommandName: cmd,
-		Args:        args[1:],
+		Args:        args,
 	}
+	log.Printf("run req %#v", req)
 	var resp jujuc.Response
 	err = jujucClient.Call("Jujuc.Main", req, &resp)
 	if err != nil {
@@ -209,6 +215,9 @@ func run(cmd string, args ...string) (stdout []byte, err error) {
 		return resp.Stdout, nil
 	}
 	errText := strings.TrimSpace(string(resp.Stderr))
+	if strings.HasPrefix(errText, "error: ") {
+		errText = errText[len("error: "):]
+	}
 	return nil, errors.New(errText)
 }
 
