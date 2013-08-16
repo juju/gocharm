@@ -1,11 +1,12 @@
 package main
+
 import (
-	"fmt"
-	"os"
 	"flag"
-	"path/filepath"
-	"os/exec"
+	"fmt"
 	"launchpad.net/juju-core/charm"
+	"os"
+	"os/exec"
+	"path/filepath"
 )
 
 var repo = flag.String("repo", "", "charm repo directory (defaults to JUJU_REPOSITORY)")
