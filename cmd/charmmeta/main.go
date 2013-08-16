@@ -2,19 +2,24 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
 	"launchpad.net/juju-core/charm"
 	"os"
+	"path/filepath"
 	"text/template"
 )
 
 var usage = `
-usage: charmmeta metaTemplate [charmdir...]
+usage: charmmeta [-r] metaTemplate [charmdir...]
 
 The charmmeta command runs the given Go
 template on the charm metadata in the charms
 found in all the listed directories and prints
 the results to the standard output.
+
+If the -r flag is specified, the directories
+are recursively searched for charms.
 
 Documentation for the Meta type is here:
 http://godoc.org/launchpad.net/juju-core/charm#Meta
@@ -30,22 +35,30 @@ charmmeta '{{range .Provides}}{{.Name}}
 {{end}}' some/charm/dir
 `[1:]
 
+var recurse = flag.Bool("r", false, "recursively search directories")
+
 func main() {
-	args := os.Args[1:]
-	if len(args) < 1 {
+	flag.Usage = func() {
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)
 	}
-	tmpl, err := template.New("").Parse(args[0])
+	flag.Parse()
+	if flag.NArg() < 1 {
+		flag.Usage()
+	}
+	args := flag.Args()[1:]
+	tmpl, err := template.New("").Parse(flag.Arg(0))
 	if err != nil {
 		fatalf("cannot parse template: %v", err)
 	}
 	w := bufio.NewWriter(os.Stdout)
 	defer w.Flush()
-	for _, dir := range os.Args[2:] {
-		dir, err := charm.ReadDir(dir)
+	dirCh := make(chan string)
+	go findCharms(dirCh, args)
+	for path := range dirCh {
+		dir, err := charm.ReadDir(path)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "charmmeta: cannot read %q: %v\n", dir, err)
+			fmt.Fprintf(os.Stderr, "charmmeta: cannot read %q: %v\n", path, err)
 			continue
 		}
 		err = tmpl.Execute(w, dir.Meta())
@@ -53,6 +66,29 @@ func main() {
 			w.Flush()
 			fatalf("template execute failed: %v", err)
 		}
+	}
+}
+
+func findCharms(dirCh chan<- string, dirs []string) {
+	defer close(dirCh)
+	if !*recurse {
+		for _, d := range dirs {
+			dirCh <- d
+		}
+		return
+	}
+	for _, d := range dirs {
+		filepath.Walk(d, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			// TODO truncate recursion if we find a metadata file
+			dir, file := filepath.Split(path)
+			if file == "metadata.yaml" {
+				dirCh <- dir
+			}
+			return nil
+		})
 	}
 }
 
