@@ -3,6 +3,7 @@ package jsonreflect
 import (
 	"encoding/json"
 	"fmt"
+	"bytes"
 )
 
 // Marshaller knows how to marshal types to JSON.
@@ -78,37 +79,12 @@ func (m *Marshaller) RefTypes() map[string]*Type {
 	return r
 }
 
-// Marshal marshals the given type to JSON.
-// If t is an Object that has been added to the marshaller more than
-// once, it will be marshalled as if it were Custom.
-func (m *Marshaller) Marshal(t *Type) ([]byte, error) {
-	var obj interface{}
-	switch t.Kind() {
-	case String, Number, Bool:
-		obj = t.Kind().String()
-	case Array:
-		obj = []*Type{t.Elem()}
-	case Object:
-		if reft := m.types[t.Name()]; reft != nil && reft.refCount > 1 {
-			obj = t.Name
-		} else if t.fields == nil {
-			obj = struct{}{}
-		} else {
-			obj = t.fields
-		}
-	case Map:
-		obj = map[string]*Type{"_map": t.Elem()}
-	case Nullable:
-		obj = map[string]*Type{"_nullable": t.Elem()}
-	case Custom:
-		if reft := m.types[t.Name()]; reft != nil && reft.refCount == 1 && reft.Kind() != Custom {
-			// Marshal custom types as normal types if we have their
-			// type information.
-			return m.Marshal(reft.Type)
-		}
-		obj = t.Name()
+func (m *Marshaller) String() string {
+	var b bytes.Buffer
+	for name, reft := range m.types {
+		fmt.Fprintf(&b, "%q[%d]: %v, ", name, reft.refCount, reft.Type)
 	}
-	return json.Marshal(obj)
+	return b.String()
 }
 
 // Normalize returns t normalized to resolve
@@ -163,6 +139,46 @@ func (m *Marshaller) Normalize(t *Type) *Type {
 		panic("unknown kind")
 	}
 	return t
+}
+
+// Marshal marshals the given type to JSON.
+// If t is an Object that has been added to the marshaller more than
+// once, it will be marshalled as if it were Custom.
+func (m *Marshaller) Marshal(t *Type) ([]byte, error) {
+	var obj interface{}
+	switch t.Kind() {
+	case String, Number, Bool:
+		obj = t.Kind().String()
+	case Array:
+		obj = []*Type{t.Elem()}
+	case Object:
+		if reft := m.types[t.Name()]; reft != nil && reft.refCount > 1 {
+			obj = t.Name
+		} else if t.fields == nil {
+			obj = struct{}{}
+		} else {
+			fields := make(map[string]*Type)
+			for name, field := range t.fields {
+				fields[name] = field
+			}
+			if t.Name() != "" {
+				fields["_type"] = CustomType(t.Name())
+			}
+			obj = fields
+		}
+	case Map:
+		obj = map[string]*Type{"_map": t.Elem()}
+	case Nullable:
+		obj = map[string]*Type{"_nullable": t.Elem()}
+	case Custom:
+		if reft := m.types[t.Name()]; reft != nil && reft.refCount == 1 && reft.Kind() != Custom {
+			// Marshal custom types as normal types if we have their
+			// type information.
+			return m.Marshal(reft.Type)
+		}
+		obj = t.Name()
+	}
+	return json.Marshal(obj)
 }
 
 func (m *Marshaller) Unmarshal(b []byte) (*Type, error) {

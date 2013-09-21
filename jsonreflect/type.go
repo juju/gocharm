@@ -221,9 +221,7 @@ func (t *Type) String() string {
 	if t == nil {
 		return "nil"
 	}
-	m := NewMarshaller()
-	m.AddType(t)
-	b, err := m.Marshal(t)
+	b, err := NewMarshaller().Marshal(t)
 	if err != nil {
 		return fmt.Sprintf("<marshal error: %v>", err)
 	}

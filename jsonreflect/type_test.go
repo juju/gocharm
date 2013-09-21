@@ -202,10 +202,6 @@ func (typeSuite) TestEqual(c *gc.C) {
 	}
 }
 
-func typeof(x interface{}) reflect.Type {
-	return reflect.TypeOf(x)
-}
-
 type (
 	myString string
 	myBool   bool
