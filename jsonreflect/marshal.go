@@ -42,26 +42,36 @@ func (m *Marshaller) AddType(t *Type) {
 	case Object:
 		if name := t.Name(); name != "" {
 			if reft := m.types[name]; reft != nil {
+				if reft.Kind() == Custom {
+					// Replace Custom placeholder with actual object type information.
+					reft.Type = t
+				}
 				reft.refCount++
 				return
 			}
-			m.types[name] = &refType{Type: t}
+			m.types[name] = &refType{Type: t, refCount: 1}
 		}
 		for _, field := range t.fields {
 			m.AddType(field)
 		}
+	case Custom:
+		if reft := m.types[t.Name()]; reft != nil {
+			reft.refCount++
+			return
+		}
+		m.types[t.Name()] = &refType{Type: t, refCount: 1}
 	default:
 		panic("unknown kind")
 	}
 }
 
-// RefTypes returns all the types that have been added more
+// RefTypes returns all the Object types that have been added more
 // than once - these types will be marshalled as if they were
 // of Custom kind.
 func (m *Marshaller) RefTypes() map[string]*Type {
 	r := make(map[string]*Type)
 	for name, t := range m.types {
-		if t.refCount > 1 {
+		if t.refCount > 1 && t.Kind() != Custom {
 			r[name] = t.Type
 		}
 	}
@@ -91,12 +101,12 @@ func (m *Marshaller) Marshal(t *Type) ([]byte, error) {
 	case Nullable:
 		obj = map[string]*Type{"_nullable": t.Elem()}
 	case Custom:
-		if reft := m.types[t.Name()]; reft != nil && reft.refCount == 1 {
+		if reft := m.types[t.Name()]; reft != nil && reft.refCount == 1 && reft.Kind() != Custom {
 			// Marshal custom types as normal types if we have their
 			// type information.
 			return m.Marshal(reft.Type)
 		}
-		obj = t.Name
+		obj = t.Name()
 	}
 	return json.Marshal(obj)
 }

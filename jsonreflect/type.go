@@ -37,6 +37,7 @@ package jsonreflect
 import (
 	"fmt"
 	"reflect"
+	"sort"
 )
 
 // TypeOf returns the JSON type representation of the given Go type.
@@ -136,7 +137,8 @@ func (t *Type) Name() string {
 	}
 }
 
-// FieldNames returns the names of the object's fields.
+// FieldNames returns the names of the object's fields
+// in alphabetical order.
 // It panics unless the type's kind is Object.
 func (t *Type) FieldNames() []string {
 	if t.Kind() != Object {
@@ -146,16 +148,19 @@ func (t *Type) FieldNames() []string {
 	for name := range t.fields {
 		names = append(names, name)
 	}
+	sort.Strings(names)
 	return names
 }
 
-// Field returns the type of the named field.
+// Field returns the type of the named field
+// and whether the field was found.
 // It panics unless the type's kind is Object.
-func (t *Type) Field(name string) *Type {
+func (t *Type) Field(name string) (*Type, bool) {
 	if t.Kind() != Object {
 		panic(fmt.Errorf("Field called on %s", t.Kind()))
 	}
-	return t.Field(name)
+	f, ok := t.fields[name]
+	return f, ok
 }
 
 func (t *Type) String() string {
