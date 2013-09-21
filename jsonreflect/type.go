@@ -273,7 +273,7 @@ func ObjectOf(name string, fields map[string]*Type) *Type {
 }
 
 // SimpleType returns a simple type. It panics unless the
-// given kind is one of Bool, Number or String.
+// given kind is Bool, Number or String.
 func SimpleType(kind Kind) *Type {
 	switch kind {
 	case Bool, Number, String:

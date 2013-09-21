@@ -2,7 +2,10 @@ package jsonreflect_test
 
 import (
 	"fmt"
+	"reflect"
+	"sort"
 	"testing"
+	"unsafe"
 
 	gc "launchpad.net/gocheck"
 	"launchpad.net/juju-utils/jsonreflect"
@@ -196,5 +199,96 @@ func (typeSuite) TestEqual(c *gc.C) {
 				}
 			}
 		}
+	}
+}
+
+func typeof(x interface{}) reflect.Type {
+	return reflect.TypeOf(x)
+}
+
+type (
+	myString string
+	myBool   bool
+	jsonable int
+	foo      struct {
+		X int
+		Y string
+	}
+)
+
+func (jsonable) MarshalJSON() ([]byte, error) {
+	return nil, nil
+}
+
+var (
+	jnumber = jsonreflect.SimpleType(jsonreflect.Number)
+	jstring = jsonreflect.SimpleType(jsonreflect.String)
+	jbool   = jsonreflect.SimpleType(jsonreflect.Bool)
+)
+
+func (typeSuite) TestTypeOf(c *gc.C) {
+	type big struct {
+		String        string
+		MyString      myString
+		Int           int
+		Int8          int8
+		Int16         int16
+		Int32         int32
+		Int64         int64
+		Uint8         uint8
+		Uint16        uint16
+		Uint32        uint32
+		Uint64        uint64
+		Float32       float32
+		Float64       float64
+		Uintptr       uintptr
+		Bool          bool
+		MyBool        myBool
+		Complex64     complex64
+		Complex128    complex128
+		ChanInt       chan int
+		UnsafePointer unsafe.Pointer
+		Error         error
+		SortInterface sort.Interface
+		Func          func()
+		IntSlice      []int
+		IntArray      [1]int
+		IntPtr        *int
+		Jsonable      jsonable
+		Foo           foo
+	}
+	expect := jsonreflect.ObjectOf("big", map[string]*jsonreflect.Type{
+		"String":        jstring,
+		"MyString":      jstring,
+		"Int":           jnumber,
+		"Int8":          jnumber,
+		"Int16":         jnumber,
+		"Int32":         jnumber,
+		"Int64":         jnumber,
+		"Uint8":         jnumber,
+		"Uint16":        jnumber,
+		"Uint32":        jnumber,
+		"Uint64":        jnumber,
+		"Float32":       jnumber,
+		"Float64":       jnumber,
+		"Uintptr":       jnumber,
+		"Bool":          jbool,
+		"MyBool":        jbool,
+		"Complex64":     jsonreflect.CustomType("complex"),
+		"Complex128":    jsonreflect.CustomType("complex"),
+		"ChanInt":       jsonreflect.CustomType("chan"),
+		"UnsafePointer": jsonreflect.CustomType("unsafe.Pointer"),
+		"Error":         jsonreflect.CustomType("error"),
+		"SortInterface": jsonreflect.CustomType("Interface"), // wrong?
+		"Func":          jsonreflect.CustomType("func"),
+		"IntSlice":      jsonreflect.ArrayOf(jnumber),
+		"IntArray":      jsonreflect.ArrayOf(jnumber),
+		"IntPtr":        jsonreflect.NullableOf(jnumber),
+		"Jsonable":      jsonreflect.CustomType("jsonable"),
+		"Foo":           jsonreflect.CustomType("foo"),
+	})
+	t := jsonreflect.TypeOf(reflect.TypeOf(big{}))
+	if !t.Equal(expect) {
+		c.Errorf("mismatch; expected %s got %s", expect, t)
 	}
 }
