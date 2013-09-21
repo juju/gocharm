@@ -153,7 +153,7 @@ func (t *Type) FieldNames() []string {
 // It panics unless the type's kind is Object.
 func (t *Type) Field(name string) *Type {
 	if t.Kind() != Object {
-		panic(fmt.Errorf("FieldNames called on %s", t.Kind()))
+		panic(fmt.Errorf("Field called on %s", t.Kind()))
 	}
 	return t.Field(name)
 }
@@ -213,15 +213,23 @@ func ObjectOf(name string, fields map[string]*Type) *Type {
 	}
 }
 
-// SimpleType returns a simple type. The given
-// kind must be one of Bool, Number or String.
+// SimpleType returns a simple type. It panics unless the
+// given kind is one of Bool, Number or String.
 func SimpleType(kind Kind) *Type {
-	return &Type{kind: kind}
+	switch kind {
+	case Bool, Number, String:
+		return &Type{kind: kind}
+	}
+	panic(fmt.Errorf("SimpleType called with invalid kind %v", kind))
 }
 
 // Custom returns a type with an unknown JSON
 // representation. The returned type has the given name.
+// It panics if name is empty.
 func CustomType(name string) *Type {
+	if name == "" {
+		panic(fmt.Errorf("CustomType called with empty name"))
+	}
 	return &Type{
 		kind: Custom,
 		name: name,
