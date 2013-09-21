@@ -28,6 +28,13 @@ func (typeSuite) TestSimpleType(c *gc.C) {
 	}
 }
 
+func (typeSuite) TestSimpleTypeWithBadKind(c *gc.C) {
+	for i, kind := range []jsonreflect.Kind{jsonreflect.Map, jsonreflect.Nullable, jsonreflect.Object, jsonreflect.Custom} {
+		c.Logf("test %d: %v", i, kind)
+		c.Assert(func() {jsonreflect.SimpleType(kind)}, gc.PanicMatches, "SimpleType called with invalid kind " + kind.String())
+	}
+}
+
 func (typeSuite) TestCustomType(c *gc.C) {
 	c.Assert(func() {jsonreflect.CustomType("")}, gc.PanicMatches, "CustomType called with empty name")
 	t := jsonreflect.CustomType("foo")
@@ -91,4 +98,39 @@ func (typeSuite) TestObjectOf(c *gc.C) {
 	c.Assert(ok, gc.Equals, false)
 	c.Assert(f, gc.IsNil)
 	c.Assert(t.String(), gc.Equals, `{"S":"string","X":"number"}`)
+}
+
+var nonEqualTypes = []*jsonreflect.Type{
+	jsonreflect.SimpleType(jsonreflect.Bool),
+	jsonreflect.SimpleType(jsonreflect.Number),
+	jsonreflect.SimpleType(jsonreflect.String),
+	jsonreflect.CustomType("custom.One"),
+	jsonreflect.CustomType("custom.Two"),
+	jsonreflect.ArrayOf(jsonreflect.SimpleType(jsonreflect.Number)),
+	jsonreflect.ArrayOf(jsonreflect.SimpleType(jsonreflect.String)),
+	jsonreflect.MapOf(jsonreflect.SimpleType(jsonreflect.Number)),
+	jsonreflect.MapOf(jsonreflect.SimpleType(jsonreflect.String)),
+	jsonreflect.NullableOf(jsonreflect.SimpleType(jsonreflect.Number)),
+	jsonreflect.NullableOf(jsonreflect.SimpleType(jsonreflect.String)),
+	jsonreflect.ObjectOf("Foo", map[string]*jsonreflect.Type{
+			"x": jsonreflect.SimpleType(jsonreflect.Number),
+			"y": jsonreflect.SimpleType(jsonreflect.String),
+		}),
+	jsonreflect.ObjectOf("Bar", map[string]*jsonreflect.Type{
+			"x": jsonreflect.SimpleType(jsonreflect.Number),
+		}),
+	jsonreflect.ObjectOf("Baz", nil),
+}
+
+func (typeSuite) TestNotEqual(c *gc.C) {
+	for i, t0 := range nonEqualTypes {
+		for j, t1 := range nonEqualTypes {
+			if i == j {
+				continue
+			}
+			if t0.Equal(t1) {
+				c.Errorf("%s compared equal to %s", t0, t1)
+			}
+		}
+	}
 }

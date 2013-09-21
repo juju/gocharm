@@ -115,6 +115,60 @@ func (t *Type) Kind() Kind {
 	return t.kind
 }
 
+// Equal reports whether the two types are equal.
+// Two types are considered equal if they are custom types
+// or objects with the same non-empty name,
+// or if they are structurally the same.
+func (t0 *Type) Equal(t1 *Type) bool {
+	if t0 == t1 {
+		return true
+	}
+	kind0, kind1 := t0.Kind(), t1.Kind()
+	switch kind0 {
+	case Number, String, Bool:
+		return kind0 == kind1
+	case Object:
+		switch kind1 {
+		case Object:
+			return equalObjects(t0, t1)
+		case Custom:
+			return t0.Name() == t1.Name()
+		}
+		return false
+	case Custom:
+		if kind1 != Object && kind1 != Custom {
+			return false
+		}
+		return t0.Name() == t1.Name()
+	case Map, Nullable, Array:
+		if kind0 != kind1 {
+			return false
+		}
+		return t0.Elem().Equal(t1.Elem())
+	default:
+		panic("unexpected kind")
+	}
+}
+
+func equalObjects(t0, t1 *Type) bool {
+	if name := t0.Name(); name != "" && name == t1.Name() {
+		return true
+	}
+	if len(t0.fields) != len(t1.fields) {
+		return false
+	}
+	for fname, f0 := range t0.fields {
+		 f1 := t1.fields[fname]
+		if f1 == nil {
+			return false
+		}
+		if !f0.Equal(f1) {
+			return false
+		}
+	}
+	return true
+}
+
 // Elem returns the type's element type. It panics
 // unless Kind is Array, Map or Nullable.
 func (t *Type) Elem() *Type {
