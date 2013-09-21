@@ -158,7 +158,7 @@ func equalObjects(t0, t1 *Type) bool {
 		return false
 	}
 	for fname, f0 := range t0.fields {
-		 f1 := t1.fields[fname]
+		f1 := t1.fields[fname]
 		if f1 == nil {
 			return false
 		}

@@ -1,4 +1,5 @@
 package jsonreflect_test
+
 import (
 	"fmt"
 	"testing"
@@ -20,10 +21,10 @@ func (typeSuite) TestSimpleType(c *gc.C) {
 		c.Logf("test %d: %v", i, kind)
 		t := jsonreflect.SimpleType(kind)
 		c.Assert(t.Kind(), gc.Equals, kind)
-		c.Assert(func() {t.Elem()}, gc.PanicMatches, "Elem called on " + kind.String())
-		c.Assert(func() {t.Name()}, gc.PanicMatches, "Name called on " + kind.String())
-		c.Assert(func() {t.FieldNames()}, gc.PanicMatches, "FieldNames called on " + kind.String())
-		c.Assert(func() {t.Field("foo")}, gc.PanicMatches, "Field called on " + kind.String())
+		c.Assert(func() { t.Elem() }, gc.PanicMatches, "Elem called on "+kind.String())
+		c.Assert(func() { t.Name() }, gc.PanicMatches, "Name called on "+kind.String())
+		c.Assert(func() { t.FieldNames() }, gc.PanicMatches, "FieldNames called on "+kind.String())
+		c.Assert(func() { t.Field("foo") }, gc.PanicMatches, "Field called on "+kind.String())
 		c.Assert(t.String(), gc.Equals, fmt.Sprintf("%q", kind.String()))
 	}
 }
@@ -31,18 +32,18 @@ func (typeSuite) TestSimpleType(c *gc.C) {
 func (typeSuite) TestSimpleTypeWithBadKind(c *gc.C) {
 	for i, kind := range []jsonreflect.Kind{jsonreflect.Map, jsonreflect.Nullable, jsonreflect.Object, jsonreflect.Custom} {
 		c.Logf("test %d: %v", i, kind)
-		c.Assert(func() {jsonreflect.SimpleType(kind)}, gc.PanicMatches, "SimpleType called with invalid kind " + kind.String())
+		c.Assert(func() { jsonreflect.SimpleType(kind) }, gc.PanicMatches, "SimpleType called with invalid kind "+kind.String())
 	}
 }
 
 func (typeSuite) TestCustomType(c *gc.C) {
-	c.Assert(func() {jsonreflect.CustomType("")}, gc.PanicMatches, "CustomType called with empty name")
+	c.Assert(func() { jsonreflect.CustomType("") }, gc.PanicMatches, "CustomType called with empty name")
 	t := jsonreflect.CustomType("foo")
 	c.Assert(t.Kind(), gc.Equals, jsonreflect.Custom)
-	c.Assert(func() {t.Elem()}, gc.PanicMatches, "Elem called on custom")
+	c.Assert(func() { t.Elem() }, gc.PanicMatches, "Elem called on custom")
 	c.Assert(t.Name(), gc.Equals, "foo")
-	c.Assert(func() {t.FieldNames()}, gc.PanicMatches, "FieldNames called on custom")
-	c.Assert(func() {t.Field("foo")}, gc.PanicMatches, "Field called on custom")
+	c.Assert(func() { t.FieldNames() }, gc.PanicMatches, "FieldNames called on custom")
+	c.Assert(func() { t.Field("foo") }, gc.PanicMatches, "Field called on custom")
 	c.Assert(t.String(), gc.Equals, `"foo"`)
 }
 
@@ -51,9 +52,9 @@ func (typeSuite) TestArrayOf(c *gc.C) {
 	t := jsonreflect.ArrayOf(elem)
 	c.Assert(t.Kind(), gc.Equals, jsonreflect.Array)
 	c.Assert(t.Elem(), gc.Equals, elem)
-	c.Assert(func() {t.Name()}, gc.PanicMatches, "Name called on array")
-	c.Assert(func() {t.FieldNames()}, gc.PanicMatches, "FieldNames called on array")
-	c.Assert(func() {t.Field("foo")}, gc.PanicMatches, "Field called on array")
+	c.Assert(func() { t.Name() }, gc.PanicMatches, "Name called on array")
+	c.Assert(func() { t.FieldNames() }, gc.PanicMatches, "FieldNames called on array")
+	c.Assert(func() { t.Field("foo") }, gc.PanicMatches, "Field called on array")
 	c.Assert(t.String(), gc.Equals, `["number"]`)
 }
 
@@ -62,9 +63,9 @@ func (typeSuite) TestMapOf(c *gc.C) {
 	t := jsonreflect.MapOf(elem)
 	c.Assert(t.Kind(), gc.Equals, jsonreflect.Map)
 	c.Assert(t.Elem(), gc.Equals, elem)
-	c.Assert(func() {t.Name()}, gc.PanicMatches, "Name called on map")
-	c.Assert(func() {t.FieldNames()}, gc.PanicMatches, "FieldNames called on map")
-	c.Assert(func() {t.Field("foo")}, gc.PanicMatches, "Field called on map")
+	c.Assert(func() { t.Name() }, gc.PanicMatches, "Name called on map")
+	c.Assert(func() { t.FieldNames() }, gc.PanicMatches, "FieldNames called on map")
+	c.Assert(func() { t.Field("foo") }, gc.PanicMatches, "Field called on map")
 	c.Assert(t.String(), gc.Equals, `{"_map":"number"}`)
 }
 
@@ -73,9 +74,9 @@ func (typeSuite) TestNullableOf(c *gc.C) {
 	t := jsonreflect.NullableOf(elem)
 	c.Assert(t.Kind(), gc.Equals, jsonreflect.Nullable)
 	c.Assert(t.Elem(), gc.Equals, elem)
-	c.Assert(func() {t.Name()}, gc.PanicMatches, "Name called on nullable")
-	c.Assert(func() {t.FieldNames()}, gc.PanicMatches, "FieldNames called on nullable")
-	c.Assert(func() {t.Field("foo")}, gc.PanicMatches, "Field called on nullable")
+	c.Assert(func() { t.Name() }, gc.PanicMatches, "Name called on nullable")
+	c.Assert(func() { t.FieldNames() }, gc.PanicMatches, "FieldNames called on nullable")
+	c.Assert(func() { t.Field("foo") }, gc.PanicMatches, "Field called on nullable")
 	c.Assert(t.String(), gc.Equals, `{"_nullable":"number"}`)
 }
 
@@ -85,7 +86,7 @@ func (typeSuite) TestObjectOf(c *gc.C) {
 	fields := map[string]*jsonreflect.Type{"S": elemS, "X": elemX}
 	t := jsonreflect.ObjectOf("foo", fields)
 	c.Assert(t.Kind(), gc.Equals, jsonreflect.Object)
-	c.Assert(func() {t.Elem()}, gc.PanicMatches, "Elem called on object")
+	c.Assert(func() { t.Elem() }, gc.PanicMatches, "Elem called on object")
 	c.Assert(t.Name(), gc.Equals, "foo")
 	c.Assert(t.FieldNames(), gc.DeepEquals, []string{"S", "X"})
 	f, ok := t.Field("S")
@@ -113,12 +114,12 @@ var nonEqualTypes = []*jsonreflect.Type{
 	jsonreflect.NullableOf(jsonreflect.SimpleType(jsonreflect.Number)),
 	jsonreflect.NullableOf(jsonreflect.SimpleType(jsonreflect.String)),
 	jsonreflect.ObjectOf("Foo", map[string]*jsonreflect.Type{
-			"x": jsonreflect.SimpleType(jsonreflect.Number),
-			"y": jsonreflect.SimpleType(jsonreflect.String),
-		}),
+		"x": jsonreflect.SimpleType(jsonreflect.Number),
+		"y": jsonreflect.SimpleType(jsonreflect.String),
+	}),
 	jsonreflect.ObjectOf("Bar", map[string]*jsonreflect.Type{
-			"x": jsonreflect.SimpleType(jsonreflect.Number),
-		}),
+		"x": jsonreflect.SimpleType(jsonreflect.Number),
+	}),
 	jsonreflect.ObjectOf("Baz", nil),
 }
 
