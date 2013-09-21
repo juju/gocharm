@@ -134,3 +134,66 @@ func (typeSuite) TestNotEqual(c *gc.C) {
 		}
 	}
 }
+
+var equalTypes = [][]*jsonreflect.Type{{
+	jsonreflect.SimpleType(jsonreflect.Bool),
+	jsonreflect.SimpleType(jsonreflect.Bool),
+}, {
+	jsonreflect.SimpleType(jsonreflect.Number),
+	jsonreflect.SimpleType(jsonreflect.Number),
+}, {
+	jsonreflect.SimpleType(jsonreflect.String),
+	jsonreflect.SimpleType(jsonreflect.String),
+}, {
+	jsonreflect.ArrayOf(jsonreflect.SimpleType(jsonreflect.String)),
+	jsonreflect.ArrayOf(jsonreflect.SimpleType(jsonreflect.String)),
+}, {
+	jsonreflect.NullableOf(jsonreflect.SimpleType(jsonreflect.String)),
+	jsonreflect.NullableOf(jsonreflect.SimpleType(jsonreflect.String)),
+}, {
+	jsonreflect.ObjectOf("Foo", map[string]*jsonreflect.Type{
+		"x": jsonreflect.SimpleType(jsonreflect.Number),
+		"y": jsonreflect.SimpleType(jsonreflect.String),
+	}),
+	jsonreflect.ObjectOf("Foo", map[string]*jsonreflect.Type{
+		"x": jsonreflect.SimpleType(jsonreflect.Number),
+		"y": jsonreflect.SimpleType(jsonreflect.String),
+	}),
+}, {
+	jsonreflect.ObjectOf("Foo", map[string]*jsonreflect.Type{
+		"x": jsonreflect.SimpleType(jsonreflect.Number),
+		"y": jsonreflect.SimpleType(jsonreflect.String),
+	}),
+	jsonreflect.ObjectOf("", map[string]*jsonreflect.Type{
+		"x": jsonreflect.SimpleType(jsonreflect.Number),
+		"y": jsonreflect.SimpleType(jsonreflect.String),
+	}),
+	jsonreflect.ObjectOf("", map[string]*jsonreflect.Type{
+		"x": jsonreflect.SimpleType(jsonreflect.Number),
+		"y": jsonreflect.SimpleType(jsonreflect.String),
+	}),
+}, {
+	// Two object types with the same non-blank name are considered
+	// equal even if they aren't actually structurally the same.
+	jsonreflect.ObjectOf("Foo", map[string]*jsonreflect.Type{
+		"x": jsonreflect.SimpleType(jsonreflect.Number),
+		"y": jsonreflect.SimpleType(jsonreflect.String),
+	}),
+	jsonreflect.ObjectOf("Foo", map[string]*jsonreflect.Type{
+		"foo": jsonreflect.SimpleType(jsonreflect.Number),
+	}),
+	jsonreflect.CustomType("Foo"),
+	jsonreflect.CustomType("Foo"),
+}}
+
+func (typeSuite) TestEqual(c *gc.C) {
+	for _, types := range equalTypes {
+		for _, t0 := range types {
+			for _, t1 := range types {
+				if !t0.Equal(t1) {
+					c.Errorf("%s compared unequal to %s", t0, t1)
+				}
+			}
+		}
+	}
+}
