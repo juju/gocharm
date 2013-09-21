@@ -37,3 +37,14 @@ func (typeSuite) TestCustomType(c *gc.C) {
 	c.Assert(func() {t.FieldNames()}, gc.PanicMatches, "FieldNames called on custom")
 	c.Assert(func() {t.Field("foo")}, gc.PanicMatches, "Field called on custom")
 }
+
+func (typeSuite) TestArrayOf(c *gc.C) {
+	elem := jsonreflect.SimpleType(jsonreflect.Number)
+	t := jsonreflect.ArrayOf(elem)
+	c.Assert(t.Kind(), gc.Equals, jsonreflect.Array)
+	c.Assert(t.Elem(), gc.Equals, elem)
+	c.Assert(func() {t.Name()}, gc.PanicMatches, "Name called on array")
+	c.Assert(func() {t.FieldNames()}, gc.PanicMatches, "FieldNames called on array")
+	c.Assert(func() {t.Field("foo")}, gc.PanicMatches, "Field called on array")
+}
+
