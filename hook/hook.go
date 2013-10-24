@@ -96,7 +96,7 @@ func (ctxt *Context) RelationIds(relationName string) ([]string, error) {
 
 func (ctxt *Context) RelationUnits(relationId string) ([]string, error) {
 	var val []string
-	if err := ctxt.runJson(&val, "relation-list", "--format", "json", "--", relationId); err != nil {
+	if err := ctxt.runJson(&val, "relation-list", "--format", "json", "-r", relationId); err != nil {
 		return nil, err
 	}
 	return val, nil

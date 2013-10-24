@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"io"
 	. "launchpad.net/gocheck"
+	"launchpad.net/juju-core/charm"
 	"launchpad.net/juju-core/state"
+	"launchpad.net/juju-core/state/api/params"
 	"launchpad.net/juju-core/utils/set"
 	"launchpad.net/juju-core/worker/uniter/jujuc"
 	"sort"
@@ -91,7 +93,7 @@ func (c *ServerContext) ClosePort(protocol string, port int) error {
 	return nil
 }
 
-func (c *ServerContext) Config() (map[string]interface{}, error) {
+func (c *ServerContext) ConfigSettings() (charm.Settings, error) {
 	return map[string]interface{}{
 		"monsters":            false,
 		"spline-reticulation": 45.0,
@@ -152,7 +154,7 @@ func (r *ServerContextRelation) UnitNames() []string {
 	return s
 }
 
-func (r *ServerContextRelation) ReadSettings(name string) (map[string]interface{}, error) {
+func (r *ServerContextRelation) ReadSettings(name string) (params.RelationSettings, error) {
 	s, found := r.units[name]
 	if !found {
 		return nil, fmt.Errorf("unknown unit %s", name)
@@ -160,14 +162,14 @@ func (r *ServerContextRelation) ReadSettings(name string) (map[string]interface{
 	return s.Map(), nil
 }
 
-type Settings map[string]interface{}
+type Settings map[string]string
 
 func (s Settings) Get(k string) (interface{}, bool) {
 	v, f := s[k]
 	return v, f
 }
 
-func (s Settings) Set(k string, v interface{}) {
+func (s Settings) Set(k string, v string) {
 	s[k] = v
 }
 
@@ -175,8 +177,8 @@ func (s Settings) Delete(k string) {
 	delete(s, k)
 }
 
-func (s Settings) Map() map[string]interface{} {
-	r := map[string]interface{}{}
+func (s Settings) Map() params.RelationSettings {
+	r := map[string]string{}
 	for k, v := range s {
 		r[k] = v
 	}

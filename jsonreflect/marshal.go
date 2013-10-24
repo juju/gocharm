@@ -161,9 +161,6 @@ func (m *Marshaller) Marshal(t *Type) ([]byte, error) {
 			for name, field := range t.fields {
 				fields[name] = field
 			}
-			if t.Name() != "" {
-				fields["_type"] = CustomType(t.Name())
-			}
 			obj = fields
 		}
 	case Map:

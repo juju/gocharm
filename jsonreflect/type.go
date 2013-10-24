@@ -1,18 +1,18 @@
 // The jsonreflect package provides a JSON-marshalable representation
-// of Go types as marshalled to JSON. The various kinds of type represent
+// of Go types as marshalled to JSON. The various kinds represent
 // JSON elements, with CustomType representing Go types that do not
-// map to JSON types, or that have a potentially fluid JSON representation
+// map to JSON types or that have a potentially fluid JSON representation
 // (interfaces and types with a MarshalJSON)
 //
 // When a *Type is JSON-encoded, it is encoded differently depending on
-// its Kind, as follows.
+// its Kind, as follows:
 //
 // The String, Bool and Number kinds are encoded as "string", "bool" and
 // "number" respectively.
 //
 // The Custom kind is encoded as a string containing the Go type name.
 //
-// The Object kind is encoded as an object with one entry for each field
+// The Object kind is encoded as a JSON object with one entry for each field
 // name, holding its JSON-encoded type.
 //
 // The Map kind is encoded as an object with a single field, "_map",
