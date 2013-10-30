@@ -7,7 +7,6 @@ import (
 	"launchpad.net/juju-utils/jsonreflect"
 )
 
-
 type marshalSuite struct{}
 
 var _ = gc.Suite(marshalSuite{})

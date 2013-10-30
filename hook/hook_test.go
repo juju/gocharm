@@ -66,7 +66,7 @@ func (s *HookSuite) SetUpTest(c *C) {
 	c.Assert(s.savedVars, HasLen, 0)
 	s.savedVars = make(map[string]string)
 	s.savedArgs = os.Args
-	os.Args = []string{"/foo/bar/peer-relation-changed"}
+	os.Args = []string{os.Args[0], "peer-relation-changed"}
 }
 
 func (s *HookSuite) TearDownTest(c *C) {
@@ -132,14 +132,14 @@ func (s *HookSuite) TestGetRelation(c *C) {
 func (s *HookSuite) TestGetRelationUnit(c *C) {
 	s.StartServer(c, 0, "peer0/0")
 
-	val, err := s.ctxt.GetRelationUnit("private-address", "peer1:1", "peer1/1")
+	val, err := s.ctxt.GetRelationUnit("peer1:1", "peer1/1", "private-address")
 	c.Assert(err, IsNil)
 	c.Assert(val, Equals, "peer1-1.example.com")
 }
 
 func (s *HookSuite) TestGetRelationUnitUnknown(c *C) {
 	s.StartServer(c, 0, "peer0/0")
-	val, err := s.ctxt.GetRelationUnit("private-address", "unknown:99", "peer1/1")
+	val, err := s.ctxt.GetRelationUnit("unknown:99", "peer1/1", "private-address")
 	c.Check(val, Equals, "")
 	c.Assert(err, ErrorMatches, `invalid value "unknown:99" for flag -r: unknown relation id`)
 }
@@ -225,7 +225,7 @@ func (s *HookSuite) TestMain(c *C) {
 	called := false
 	hook.Register("peer-relation-changed", func(ctxt *hook.Context) error {
 		called = true
-		val, err := ctxt.GetRelationUnit("private-address", "peer1:1", "peer1/1")
+		val, err := ctxt.GetRelationUnit("peer1:1", "peer1/1", "private-address")
 		c.Check(err, IsNil)
 		c.Check(val, Equals, "peer1-1.example.com")
 		return nil

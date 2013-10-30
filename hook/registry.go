@@ -2,9 +2,9 @@ package hook
 
 import (
 	"fmt"
+	"launchpad.net/errgo/errors"
 	"net/rpc"
 	"os"
-	"path/filepath"
 )
 
 type Context struct {
@@ -78,12 +78,12 @@ var relationEnvVars = []string{
 func Main() error {
 	ctxt, err := NewContext()
 	if err != nil {
-		return err
+		return errors.Wrap(err)
 	}
 	defer ctxt.Close()
 	f := hooks[ctxt.HookName]
 	if f == nil {
-		return fmt.Errorf("hook %q not registered", ctxt.HookName)
+		return errors.Newf("hook %q not registered", ctxt.HookName)
 	}
 	return f(ctxt)
 }
@@ -99,10 +99,13 @@ func NewContext() (*Context, error) {
 	}
 	for _, v := range vars {
 		if os.Getenv(v) == "" {
-			return nil, fmt.Errorf("required environment variable %q not set", v)
+			return nil, errors.Newf("required environment variable %q not set", v)
 		}
 	}
-	_, hookName := filepath.Split(os.Args[0])
+	if len(os.Args) != 2 {
+		return nil, errors.New("one argument required")
+	}
+	hookName := os.Args[1]
 	ctxt := &Context{
 		UUID:           os.Getenv(envUUID),
 		Unit:           os.Getenv(envUnitName),
@@ -115,7 +118,7 @@ func NewContext() (*Context, error) {
 	}
 	client, err := rpc.Dial("unix", os.Getenv(envSocketPath))
 	if err != nil {
-		return nil, fmt.Errorf("cannot dial uniter: %v", err)
+		return nil, errors.Newf("cannot dial uniter: %v", err)
 	}
 	ctxt.jujucClient = client
 	return ctxt, nil

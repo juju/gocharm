@@ -1,9 +1,9 @@
 package jsonreflect
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
-	"bytes"
 )
 
 // Marshaller knows how to marshal types to JSON.
