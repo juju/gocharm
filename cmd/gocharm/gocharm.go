@@ -1,3 +1,31 @@
+// Gocharm processes one or more Juju charms with hooks written in Go.
+// All hooks are compiled into a single Go executable, implemented by
+// the runhook package, which must be implemented in the src/runhook
+// directory inside the charm. It ignores charms without that directory.
+//
+// Gocharm increments the revision number of any charms that it
+// compiles.
+//
+// The runhook package must implement a RegisterHooks function which
+// must register any hooks required by calling hook.RegisterHook (see
+// launchpad.net/juju-utils/hook).
+//
+// Gocharm runs runhook.RegisterHooks locally to find out what hooks are
+// registered, and automatically writes stubs in the hooks directory.
+// When the charm is deployed, these will call the runhook executable
+// and arrange for registered hook functions to be called. It takes care
+// not to overwrite any hooks that may contain custom user changes - it
+// might be necessary to remove or change these by hand if gocharm
+// prints a warning message about this.
+//
+// The runhook package is compiled with the charm directory inserted
+// before the start of GOPATH, meaning that charm-specific packages can
+// be defined and used from runhook.
+//
+// Currently gocharm iterates through all charms inside $JUJU_REPOSITORY.
+// TODO change this to allow specific charms to be specified, defaulting
+// to the charm enclosing the current directory.
+//
 package main
 
 import (
