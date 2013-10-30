@@ -2,6 +2,9 @@
 // All hooks are compiled into a single Go executable, implemented by
 // the runhook package, which must be implemented in the src/runhook
 // directory inside the charm. It ignores charms without that directory.
+// Note that it compiles the Go executable in cross-compilation mode,
+// so cgo-based packages will not work and the resulting charm will
+// only work on linux-amd64-based images.
 //
 // Gocharm increments the revision number of any charms that it
 // compiles.
@@ -25,6 +28,11 @@
 // Currently gocharm iterates through all charms inside $JUJU_REPOSITORY.
 // TODO change this to allow specific charms to be specified, defaulting
 // to the charm enclosing the current directory.
+//
+// TODO allow a mode that does not compile locally, installing golang
+// on the remote node and compiling the code there.
+//
+// TODO add -clean flag.
 //
 package main
 
