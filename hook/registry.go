@@ -59,7 +59,7 @@ var relationEnvVars = []string{
 
 // Main creates a new context and invokes the appropriate
 // registered hook function.
-func Main() error {
+func Main() (err error) {
 	ctxt, err := NewContext()
 	if err != nil {
 		return errors.Wrap(err)
@@ -69,6 +69,15 @@ func Main() error {
 	if f == nil {
 		return errors.Newf("hook %q not registered", ctxt.HookName)
 	}
+	defer func() {
+		if saveErr := ctxt.SaveState(); saveErr != nil {
+			if err == nil {
+				err = saveErr
+			} else {
+				ctxt.Logf("cannot save local state: %v", saveErr)
+			}
+		}
+	}()
 	return f(ctxt)
 }
 
@@ -99,6 +108,7 @@ func NewContext() (*Context, error) {
 		RemoteUnit:     os.Getenv(envRemoteUnit),
 		HookName:       hookName,
 		jujucContextId: os.Getenv(envJujuContextId),
+		localState:     make(map[string]localState),
 	}
 	client, err := rpc.Dial("unix", os.Getenv(envSocketPath))
 	if err != nil {

@@ -2,6 +2,7 @@ package hook_test
 
 import (
 	"fmt"
+	"io/ioutil"
 	gc "launchpad.net/gocheck"
 	"launchpad.net/juju-core/cmd"
 	"launchpad.net/juju-core/worker/uniter/jujuc"
@@ -54,7 +55,6 @@ func (s *HookSuite) StartServer(c *gc.C, relid int, remote string) {
 	charmDir := filepath.Join(c.MkDir(), "charmdir")
 	err = os.Mkdir(charmDir, 0777)
 	c.Assert(err, gc.IsNil)
-
 	s.setenv("CHARM_DIR", charmDir)
 
 	if r, found := s.srvCtxt.HookRelation(); found {
@@ -125,6 +125,45 @@ func (s *HookSuite) TestSimple(c *gc.C) {
 // TestClosePort
 // TestSetRelation
 // TestSetRelationWithId
+
+func (s *HookSuite) TestLocalState(c *gc.C) {
+	s.StartServer(c, 0, "peer0/0")
+
+	type fooState struct {
+		Foo int
+		Bar string
+	}
+	var state fooState
+	err := s.ctxt.LocalState("foo", &state)
+	c.Assert(err, gc.IsNil)
+	c.Assert(state, gc.Equals, fooState{})
+
+	c.Assert(func() {
+		s.ctxt.LocalState("foo", &state)
+	}, gc.PanicMatches, "LocalState called twice for \"foo\"")
+
+	state.Foo = 88
+	state.Bar = "xxx"
+	err = s.ctxt.SaveState()
+	c.Assert(err, gc.IsNil)
+
+	ctxt, err := hook.NewContext()
+	c.Assert(err, gc.IsNil)
+	defer ctxt.Close()
+
+	var newState fooState
+	err = ctxt.LocalState("foo", &newState)
+	c.Assert(err, gc.IsNil)
+	c.Assert(newState, gc.Equals, state)
+
+	newState.Foo = 88
+	err = ctxt.SaveState()
+	c.Assert(err, gc.IsNil)
+
+	data, err := ioutil.ReadFile(filepath.Join(s.ctxt.CharmDir, "localstate", "foo"))
+	c.Assert(err, gc.IsNil)
+	c.Assert(string(data), gc.Equals, `{"Foo":88,"Bar":"xxx"}`)
+}
 
 func (s *HookSuite) TestGetRelation(c *gc.C) {
 	s.StartServer(c, 0, "peer0/0")
@@ -230,6 +269,9 @@ func (s *HookSuite) TestMain(c *gc.C) {
 	called := false
 	hook.Register("peer-relation-changed", func(ctxt *hook.Context) error {
 		called = true
+		localState := "value"
+		err := ctxt.LocalState("x", &localState)
+		c.Check(err, gc.IsNil)
 		val, err := ctxt.GetRelationUnit("peer1:1", "peer1/1", "private-address")
 		c.Check(err, gc.IsNil)
 		c.Check(val, gc.Equals, "peer1-1.example.com")
@@ -237,6 +279,14 @@ func (s *HookSuite) TestMain(c *gc.C) {
 	})
 	err := hook.Main()
 	c.Assert(err, gc.IsNil)
+
+	// Check that the local state has been saved.
+	ctxt, err := hook.NewContext()
+	c.Assert(err, gc.IsNil)
+	var localState string
+	err = ctxt.LocalState("x", &localState)
+	c.Assert(err, gc.IsNil)
+	c.Assert(localState, gc.Equals, "value")
 }
 
 func (s *HookSuite) TestMainWithUnregisteredHook(c *gc.C) {
