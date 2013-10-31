@@ -1,5 +1,6 @@
 // The hook package provides a Go interface to the
-// charm hook commands.
+// Juju charm hook commands. It is designed to be used
+// alongside the gocharm command (launchpad.net/juju-utils/cmd/gocharm)
 package hook
 
 import (
@@ -14,6 +15,7 @@ import (
 	"strings"
 )
 
+// Context provides the context for a running Juju hook.
 type Context struct {
 	// Valid for all hooks
 	UUID     string

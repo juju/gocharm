@@ -19,10 +19,10 @@ import (
 
 // serverCommand implements the http server for the charm. It's invoked
 // independently of hook context.
-func serverCommand(handler http.Handler) {
+func serverCommand(newHandler func() http.Handler) {
 	serverAddr := flag.String("http", "", "HTTP service address (e.g. :8080)")
 	flag.Parse()
-	log.Fatal(http.ListenAndServe(*serverAddr, handler))
+	log.Fatal(http.ListenAndServe(*serverAddr, newHandler()))
 }
 
 // serverState holds the persistent charm state for the server part of
@@ -40,21 +40,21 @@ type server struct {
 
 // Register registers the handlers and commands necessary for
 // starting an http server in a charm.
-func Register(r *hook.Registry, handler http.Handler) {
-	serverRegister(r, "config-changed", (*server).configChanged)
-	serverRegister(r, "stop", (*server).uninstall)
-	r.RegisterCommand("server", func() {
-		serverCommand(handler)
-	})
-}
+func Register(r *hook.Registry, newHandler func() http.Handler) {
+	register := func(hookName string, f func(*server) error) {
+		r.Register(hookName, func(ctxt *hook.Context) error {
+			srv, err := getServer(ctxt)
+			if err != nil {
+				return errors.Wrap(err)
+			}
+			return f(srv)
+		})
+	}
 
-func serverRegister(r *hook.Registry, hookName string, f func(*server) error) {
-	r.Register(hookName, func(ctxt *hook.Context) error {
-		srv, err := getServer(ctxt)
-		if err != nil {
-			return errors.Wrap(err)
-		}
-		return f(srv)
+	register("config-changed", (*server).configChanged)
+	register("stop", (*server).uninstall)
+	r.RegisterCommand("server", func() {
+		serverCommand(newHandler)
 	})
 }
 
