@@ -291,6 +291,19 @@ func (s *HookSuite) TestMain(c *gc.C) {
 	c.Assert(localState, gc.Equals, "value")
 }
 
+func (s *HookSuite) TestMainCallsMainFunc(c *gc.C) {
+	os.Args = []string{"exe", "main", "arg1", "arg2"}
+	err := hook.Main(hook.NewRegistry())
+	c.Assert(err, gc.ErrorMatches, "no main function registered")
+	var callArgs []string
+	hook.MainFunc = func() {
+		callArgs = append(callArgs, os.Args...)
+	}
+	err = hook.Main(hook.NewRegistry())
+	c.Assert(err, gc.IsNil)
+	c.Assert(callArgs, gc.DeepEquals, []string{"exe", "arg1", "arg2"})
+}
+
 type localState struct {
 	CallCount int
 	Name      string

@@ -1,5 +1,5 @@
 // Gocharm processes one or more Juju charms with hooks written in Go.
-// All hooks are compiled into a single Go executable, implemented by
+// All hooks are compiled into a single Go executable, bin/runhook, implemented by
 // the runhook package, which must be implemented in the src/runhook
 // directory inside the charm. It ignores charms without that directory.
 // Note that it compiles the Go executable in cross-compilation mode,
@@ -129,7 +129,7 @@ func main() {
 	r := hook.NewRegistry()
 	runhook.RegisterHooks(r)
 	if err := hook.Main(r); err != nil {
-		fmt.Fprintf(os.Stderr, "%v\n", err)
+		fmt.Fprintf(os.Stderr, "runhook: %v\n", err)
 		os.Exit(1)
 	}
 }

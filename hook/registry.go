@@ -45,6 +45,15 @@ func (r *Registry) Register(name string, f func(ctxt *Context) error) {
 	})
 }
 
+// MainFunc will be called by Main if not nil and the runhook executable
+// is invoked with "main" as its first argument. os.Args be changed to
+// exclude the original first argument, so this function can be written
+// as if it was a regular main function.
+//
+// This enables a runhook executable to build in other functionality
+// that is not directly executed as part of a hook.
+var MainFunc func()
+
 // NewRegistry returns a sub-registry of r. Local state
 // stored by hooks registered with that will be stored relative to the
 // given name within r; likewise new registries created by NewRegistry
@@ -94,9 +103,24 @@ var relationEnvVars = []string{
 	envRemoteUnit,
 }
 
-// Main creates a new context and invokes the appropriate
-// hook function registered in the given registry.
+// Main creates a new context from the environment
+// and invokes the appropriate hook function registered
+// in the given registry.
+// It expects to find the hook name in os.Args[1]; this
+// may also be "main" in which case it will invoke MainFunc.
 func Main(r *Registry) error {
+	if len(os.Args) < 2 {
+		return errors.New("usage: runhook hook-name|main [mainargs...]")
+	}
+	if os.Args[1] == "main" {
+		if MainFunc == nil {
+			return errors.New("no main function registered")
+		}
+		// Elide "main" argument.
+		os.Args = append(os.Args[:1], os.Args[2:]...)
+		MainFunc()
+		return nil
+	}
 	ctxt, err := NewContext()
 	if err != nil {
 		return errors.Wrap(err)
