@@ -325,10 +325,10 @@ func (s *HookSuite) TestMainWithEmptyRegistry(c *gc.C) {
 
 func (s *HookSuite) TestMainUsage(c *gc.C) {
 	r := hook.NewRegistry()
-	r.RegisterCommand("server", func(){})
-	r.RegisterCommand("client",  func(){})
-	r.Register("peer-relation-changed", func(*hook.Context) error {return nil})
-	r.Register("config-changed", func(*hook.Context) error {return nil})
+	r.RegisterCommand("server", func() {})
+	r.RegisterCommand("client", func() {})
+	r.Register("peer-relation-changed", func(*hook.Context) error { return nil })
+	r.Register("config-changed", func(*hook.Context) error { return nil })
 	os.Args = []string{"exe"}
 	err := hook.Main(r)
 	c.Assert(err, gc.ErrorMatches, `usage: runhook cmd-server \[arg\.\.\.]
@@ -341,13 +341,13 @@ func (s *HookSuite) TestCommandCall(c *gc.C) {
 	s.StartServer(c, 0, "peer0/0")
 
 	r := hook.NewRegistry()
-	callArgs := make(map[string] []string)
+	callArgs := make(map[string][]string)
 	cmdFunc := func(name string) func() {
 		return func() {
 			callArgs[name] = append([]string{}, os.Args...)
 		}
 	}
-		
+
 	r.RegisterCommand("main", cmdFunc("main"))
 	r.RegisterCommand("other", cmdFunc("other"))
 	r1 := r.NewRegistry("sub")
@@ -381,8 +381,8 @@ func (s *HookSuite) TestCommandCall(c *gc.C) {
 	}
 
 	c.Assert(callArgs, gc.DeepEquals, map[string][]string{
-		"main": {"exe", "arg1", "arg2"},
-		"other": {"exe", "arg1", "arg2"},
+		"main":     {"exe", "arg1", "arg2"},
+		"other":    {"exe", "arg1", "arg2"},
 		"main-sub": {"exe", "arg1", "arg2"},
 	})
 }
@@ -466,7 +466,7 @@ func (s *HookSuite) TestHierarchicalLocalState(c *gc.C) {
 func (s *HookSuite) TestMainWithUnregisteredHook(c *gc.C) {
 	s.StartServer(c, 0, "peer0/0")
 	r := hook.NewRegistry()
-	r.Register("install", func(*hook.Context)error{ return nil})
+	r.Register("install", func(*hook.Context) error { return nil })
 	os.Args = []string{"exe", "peer-relation-changed"}
 	err := hook.Main(r)
 	c.Assert(err, gc.ErrorMatches, `usage: runhook install`)

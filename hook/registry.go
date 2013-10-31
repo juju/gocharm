@@ -2,12 +2,12 @@ package hook
 
 import (
 	"fmt"
-	"sort"
-	"strings"
 	"launchpad.net/errgo/errors"
 	"net/rpc"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 )
 
 type hookFunc struct {
@@ -19,13 +19,13 @@ type hookFunc struct {
 type Registry struct {
 	localStateName string
 	hooks          map[string][]hookFunc
-	commands	map[string]func()
+	commands       map[string]func()
 }
 
 // NewRegistry returns a new hook registry.
 func NewRegistry() *Registry {
 	return &Registry{
-		hooks: make(map[string][]hookFunc),
+		hooks:    make(map[string][]hookFunc),
 		commands: make(map[string]func()),
 	}
 }
@@ -80,7 +80,7 @@ func (r *Registry) NewRegistry(localStateName string) *Registry {
 	return &Registry{
 		localStateName: filepath.Join(r.localStateName, localStateName),
 		hooks:          r.hooks,
-		commands: r.commands,
+		commands:       r.commands,
 	}
 }
 
@@ -122,7 +122,7 @@ var relationEnvVars = []string{
 func usageError(r *Registry) error {
 	var allowed []string
 	for cmd := range r.commands {
-		allowed = append(allowed, "cmd-" + cmd + " [arg...]")
+		allowed = append(allowed, "cmd-"+cmd+" [arg...]")
 	}
 	for hook := range r.hooks {
 		allowed = append(allowed, hook)

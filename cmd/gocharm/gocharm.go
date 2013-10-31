@@ -68,7 +68,6 @@ import (
 	"strings"
 )
 
-
 var repo = flag.String("repo", "", "charm repo directory (defaults to JUJU_REPOSITORY)")
 var test = flag.Bool("test", false, "run tests before building")
 var verbose = flag.Bool("v", false, "print information about charms being built")

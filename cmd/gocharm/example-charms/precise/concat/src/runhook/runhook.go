@@ -2,9 +2,12 @@ package runhook
 
 import (
 	"fmt"
+	"html"
+	"net/http"
 	"strings"
 
 	"launchpad.net/errgo/errors"
+	"launchpad.net/juju-utils/charmbits/httpserver"
 	"launchpad.net/juju-utils/hook"
 )
 
@@ -13,7 +16,6 @@ import (
 // relations.
 
 func RegisterHooks(r *hook.Registry) {
-	hook.MainFunc = main
 	r.Register("install", install)
 	r.Register("start", start)
 	r.Register("config-changed", changed)
@@ -21,7 +23,11 @@ func RegisterHooks(r *hook.Registry) {
 	r.Register("upstream-relation-departed", changed)
 	r.Register("downstream-relation-joined", changed)
 
-	registerWebServer(r.NewRegistry("server"))
+	mux := http.NewServeMux()
+	mux.HandleFunc("/bar", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "Hello, %q", html.EscapeString(r.URL.Path))
+	})
+	httpserver.Register(r.NewRegistry("httpserver"), mux)
 }
 
 func changed(ctxt *hook.Context) error {
