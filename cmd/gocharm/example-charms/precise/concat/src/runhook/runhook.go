@@ -11,13 +11,13 @@ import (
 // relations, concatenates them and makes them available to downstream
 // relations.
 
-func RegisterHooks() {
-	hook.Register("install", install)
-	hook.Register("start", start)
-	hook.Register("config-changed", changed)
-	hook.Register("upstream-relation-changed", changed)
-	hook.Register("upstream-relation-departed", changed)
-	hook.Register("downstream-relation-joined", changed)
+func RegisterHooks(r *hook.Registry) {
+	r.Register("install", install)
+	r.Register("start", start)
+	r.Register("config-changed", changed)
+	r.Register("upstream-relation-changed", changed)
+	r.Register("upstream-relation-departed", changed)
+	r.Register("downstream-relation-joined", changed)
 }
 
 func changed(ctxt *hook.Context) error {

@@ -1,32 +1,69 @@
 package hook
 
 import (
-	"fmt"
 	"launchpad.net/errgo/errors"
 	"net/rpc"
 	"os"
+	"path/filepath"
 )
 
-var hooks = make(map[string]func(ctxt *Context) error)
+type hookFunc struct {
+	localStateName string
+	run            func(ctxt *Context) error
+}
 
-// Register registers a hook to be called when Main
-// is called in that hook context.
-func Register(name string, f func(ctxt *Context) error) {
-	// TODO(rog) implement validName
-	//if !validName(name) {
+// Registry allows the registration of hook functions.
+type Registry struct {
+	localStateName string
+	hooks          map[string][]hookFunc
+}
+
+// NewRegistry returns a new hook registry.
+func NewRegistry() *Registry {
+	return &Registry{
+		hooks: make(map[string][]hookFunc),
+	}
+}
+
+// Register registers the given function to be called when the
+// charm hook with the given name is invoked.
+// The function must not use its provided Context
+// after it returns.
+//
+// If more than one function is registered for a given hook,
+// each function will be called in turn until one returns an error;
+// the context's local state will be saved with SaveState
+// after each call.
+func (r *Registry) Register(name string, f func(ctxt *Context) error) {
+	// TODO(rog) implement validHookName
+	//if !validHookName(name) {
 	//	panic(fmt.Errorf("invalid hook name %q", name))
 	//}
-	if hooks[name] != nil {
-		panic(fmt.Errorf("hook %q already registered", name))
+	r.hooks[name] = append(r.hooks[name], hookFunc{
+		run:            f,
+		localStateName: r.localStateName,
+	})
+}
+
+// NewRegistry returns a sub-registry of the receiver. Local state
+// stored by hooks registered with that will be stored relative to the
+// given name; likewise new registries created by NewRegistry on it will
+// store local state relatively.
+//
+// This enables hierarchical local storage for charm hooks.
+func (r *Registry) NewRegistry(localStateName string) *Registry {
+	// TODO check name is valid
+	return &Registry{
+		localStateName: filepath.Join(r.localStateName, localStateName),
+		hooks:          r.hooks,
 	}
-	hooks[name] = f
 }
 
 // RegisteredHooks returns the names of all currently
 // registered hooks.
-func RegisteredHooks() []string {
+func (r *Registry) RegisteredHooks() []string {
 	var names []string
-	for name := range hooks {
+	for name := range r.hooks {
 		names = append(names, name)
 	}
 	return names
@@ -58,17 +95,29 @@ var relationEnvVars = []string{
 }
 
 // Main creates a new context and invokes the appropriate
-// registered hook function.
-func Main() (err error) {
+// hook function registered in the given registry.
+func Main(r *Registry) error {
 	ctxt, err := NewContext()
 	if err != nil {
 		return errors.Wrap(err)
 	}
 	defer ctxt.Close()
-	f := hooks[ctxt.HookName]
-	if f == nil {
+	hookFuncs, ok := r.hooks[ctxt.HookName]
+	if !ok {
 		return errors.Newf("hook %q not registered", ctxt.HookName)
 	}
+	for _, f := range hookFuncs {
+		ctxt.localStateName = f.localStateName
+		if err := f.runHook(ctxt); err != nil {
+			// TODO better error context here, perhaps
+			// including local state name, hook name, etc.
+			return errors.Wrap(err)
+		}
+	}
+	return nil
+}
+
+func (f hookFunc) runHook(ctxt *Context) (err error) {
 	defer func() {
 		if saveErr := ctxt.SaveState(); saveErr != nil {
 			if err == nil {
@@ -78,13 +127,15 @@ func Main() (err error) {
 			}
 		}
 	}()
-	return f(ctxt)
+	return f.run(ctxt)
 }
 
 // NewContext creates a hook context from the current environment.
 // Clients should not use this function, but use their init functions to
 // call Register to register a hook function instead, which enables
 // gocharm to generate hook stubs automatically.
+//
+// Local state will be stored relative to the given localStateName.
 func NewContext() (*Context, error) {
 	vars := mustEnvVars
 	if os.Getenv(envRelationName) != "" {
@@ -108,7 +159,7 @@ func NewContext() (*Context, error) {
 		RemoteUnit:     os.Getenv(envRemoteUnit),
 		HookName:       hookName,
 		jujucContextId: os.Getenv(envJujuContextId),
-		localState:     make(map[string]localState),
+		localState:     make(map[string]interface{}),
 	}
 	client, err := rpc.Dial("unix", os.Getenv(envSocketPath))
 	if err != nil {

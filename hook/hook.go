@@ -14,12 +14,6 @@ import (
 	"strings"
 )
 
-type localState struct {
-	path string
-	ptr  interface{}
-	new  bool
-}
-
 type Context struct {
 	// Valid for all hooks
 	UUID     string
@@ -34,11 +28,16 @@ type Context struct {
 
 	jujucContextId string
 	jujucClient    *rpc.Client
-	localState     map[string]localState
+
+	// localState maps from file path to the data to be
+	// stored there.
+	localState map[string]interface{}
+
+	localStateName string
 }
 
 func (ctxt *Context) stateDir() string {
-	return filepath.Join(ctxt.CharmDir, "localstate")
+	return filepath.Join(ctxt.CharmDir, "localstate", ctxt.localStateName)
 }
 
 // LocalState reads charm local state for the given name, which should
@@ -47,46 +46,49 @@ func (ctxt *Context) stateDir() string {
 // JSON. When the hook has completed, the value will be saved back to
 // the same place, enabling persistent state to be saved.
 //
-// LocalState will panic if it is called twice for the same name in the
-// same hook execution.
+// LocalState will panic if it is called twice for the same name without
+// an intervening call to SaveState.
 func (ctxt *Context) LocalState(name string, ptr interface{}) error {
-	if _, ok := ctxt.localState[name]; ok {
-		panic(errors.Newf("LocalState called twice for %q", name))
+	// TODO check that name is valid (no slash, no .json extension)
+	path := filepath.Join(ctxt.stateDir(), name) + ".json"
+	if _, ok := ctxt.localState[path]; ok {
+		panic(errors.Newf("LocalState called twice for %q", path))
 	}
-	state := localState{
-		path: filepath.Join(ctxt.stateDir(), name),
-		ptr:  ptr,
-	}
-	data, err := ioutil.ReadFile(state.path)
+	data, err := ioutil.ReadFile(path)
 	if err != nil {
 		if !os.IsNotExist(err) {
 			return errors.Wrap(err)
 		}
-		state.new = true
-		ctxt.localState[name] = state
+		ctxt.localState[path] = ptr
 		return nil
 	}
 	if err := json.Unmarshal(data, ptr); err != nil {
 		return errors.Wrap(err)
 	}
-	ctxt.localState[name] = state
+	ctxt.localState[path] = ptr
 	return nil
 }
 
 // SaveState saves the state of all the values passed to LocalState.
+// If this succeeds, LocalState may be called again for any name.
 func (ctxt *Context) SaveState() error {
-	if err := os.MkdirAll(ctxt.stateDir(), 0700); err != nil {
-		return errors.Wrap(err)
-	}
-	for name, state := range ctxt.localState {
-		data, err := json.Marshal(state.ptr)
+	made := make(map[string]bool)
+	for path, ptr := range ctxt.localState {
+		if dir := filepath.Dir(path); !made[dir] {
+			if err := os.MkdirAll(dir, 0700); err != nil {
+				return errors.Wrap(err)
+			}
+			made[dir] = true
+		}
+		data, err := json.Marshal(ptr)
 		if err != nil {
-			return errors.Wrapf(err, "could not marshal state %q", name)
+			return errors.Wrapf(err, "could not marshal state %q", path)
 		}
-		if err := ioutil.WriteFile(state.path, data, 0600); err != nil {
-			return errors.Wrapf(err, "could not save state %q to %q", name, state.path)
+		if err := ioutil.WriteFile(path, data, 0600); err != nil {
+			return errors.Wrapf(err, "could not save state to %q", path)
 		}
 	}
+	ctxt.localState = make(map[string]interface{})
 	return nil
 }
 

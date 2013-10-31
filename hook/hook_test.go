@@ -140,7 +140,7 @@ func (s *HookSuite) TestLocalState(c *gc.C) {
 
 	c.Assert(func() {
 		s.ctxt.LocalState("foo", &state)
-	}, gc.PanicMatches, "LocalState called twice for \"foo\"")
+	}, gc.PanicMatches, "LocalState called twice for \".*/localstate/foo.json\"")
 
 	state.Foo = 88
 	state.Bar = "xxx"
@@ -160,7 +160,7 @@ func (s *HookSuite) TestLocalState(c *gc.C) {
 	err = ctxt.SaveState()
 	c.Assert(err, gc.IsNil)
 
-	data, err := ioutil.ReadFile(filepath.Join(s.ctxt.CharmDir, "localstate", "foo"))
+	data, err := ioutil.ReadFile(filepath.Join(s.ctxt.CharmDir, "localstate", "foo.json"))
 	c.Assert(err, gc.IsNil)
 	c.Assert(string(data), gc.Equals, `{"Foo":88,"Bar":"xxx"}`)
 }
@@ -256,18 +256,18 @@ func (s *HookSuite) TestGetAllConfig(c *gc.C) {
 }
 
 func (s *HookSuite) TestRegister(c *gc.C) {
-	defer hook.ClearRegistry()
-	hook.Register("install", func(ctxt *hook.Context) error {
+	r := hook.NewRegistry()
+	r.Register("install", func(ctxt *hook.Context) error {
 		return nil
 	})
-	c.Assert(hook.RegisteredHooks(), gc.DeepEquals, []string{"install"})
+	c.Assert(r.RegisteredHooks(), gc.DeepEquals, []string{"install"})
 }
 
 func (s *HookSuite) TestMain(c *gc.C) {
-	defer hook.ClearRegistry()
+	r := hook.NewRegistry()
 	s.StartServer(c, 0, "peer0/0")
 	called := false
-	hook.Register("peer-relation-changed", func(ctxt *hook.Context) error {
+	r.Register("peer-relation-changed", func(ctxt *hook.Context) error {
 		called = true
 		localState := "value"
 		err := ctxt.LocalState("x", &localState)
@@ -277,12 +277,13 @@ func (s *HookSuite) TestMain(c *gc.C) {
 		c.Check(val, gc.Equals, "peer1-1.example.com")
 		return nil
 	})
-	err := hook.Main()
+	err := hook.Main(r)
 	c.Assert(err, gc.IsNil)
 
 	// Check that the local state has been saved.
 	ctxt, err := hook.NewContext()
 	c.Assert(err, gc.IsNil)
+	defer ctxt.Close()
 	var localState string
 	err = ctxt.LocalState("x", &localState)
 	c.Assert(err, gc.IsNil)
@@ -291,6 +292,6 @@ func (s *HookSuite) TestMain(c *gc.C) {
 
 func (s *HookSuite) TestMainWithUnregisteredHook(c *gc.C) {
 	s.StartServer(c, 0, "peer0/0")
-	err := hook.Main()
+	err := hook.Main(hook.NewRegistry())
 	c.Assert(err, gc.ErrorMatches, `hook "peer-relation-changed" not registered`)
 }

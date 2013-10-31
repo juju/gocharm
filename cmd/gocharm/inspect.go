@@ -149,8 +149,9 @@ import (
 )
 
 func main() {
-	runhook.RegisterHooks()
-	for _, name := range hook.RegisteredHooks() {
+	r := hook.NewRegistry()
+	runhook.RegisterHooks(r)
+	for _, name := range r.RegisteredHooks() {
 		fmt.Printf("%s\n", name)
 	}
 }

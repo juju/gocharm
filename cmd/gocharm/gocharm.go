@@ -126,8 +126,9 @@ import (
 )
 
 func main() {
-	runhook.RegisterHooks()
-	if err := hook.Main(); err != nil {
+	r := hook.NewRegistry()
+	runhook.RegisterHooks(r)
+	if err := hook.Main(r); err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
 	}
