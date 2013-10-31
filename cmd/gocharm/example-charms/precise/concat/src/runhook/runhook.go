@@ -1,10 +1,11 @@
 package runhook
+
 import (
 	"fmt"
 	"strings"
 
-	"launchpad.net/juju-utils/hook"
 	"launchpad.net/errgo/errors"
+	"launchpad.net/juju-utils/hook"
 )
 
 // This charm takes all the string values from units on upstream
@@ -12,12 +13,15 @@ import (
 // relations.
 
 func RegisterHooks(r *hook.Registry) {
+	hook.MainFunc = main
 	r.Register("install", install)
 	r.Register("start", start)
 	r.Register("config-changed", changed)
 	r.Register("upstream-relation-changed", changed)
 	r.Register("upstream-relation-departed", changed)
 	r.Register("downstream-relation-joined", changed)
+
+	registerWebServer(r.NewRegistry("server"))
 }
 
 func changed(ctxt *hook.Context) error {
@@ -61,11 +65,9 @@ func changed(ctxt *hook.Context) error {
 }
 
 func install(ctxt *hook.Context) error {
-	ctxt.Logf("install")
 	return nil
 }
 
 func start(ctxt *hook.Context) error {
-	ctxt.Logf("start")
 	return nil
 }
