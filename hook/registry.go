@@ -7,22 +7,6 @@ import (
 	"os"
 )
 
-type Context struct {
-	// Valid for all hooks
-	UUID     string
-	Unit     string
-	CharmDir string
-	HookName string
-
-	// Valid for relation-related hooks.
-	RelationName string
-	RelationId   string
-	RemoteUnit   string
-
-	jujucContextId string
-	jujucClient    *rpc.Client
-}
-
 var hooks = make(map[string]func(ctxt *Context) error)
 
 // Register registers a hook to be called when Main

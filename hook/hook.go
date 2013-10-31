@@ -5,11 +5,90 @@ package hook
 import (
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"launchpad.net/errgo/errors"
 	"launchpad.net/juju-core/worker/uniter/jujuc"
-	"log"
+	"net/rpc"
+	"os"
+	"path/filepath"
 	"strings"
 )
+
+type localState struct {
+	path string
+	ptr  interface{}
+	new  bool
+}
+
+type Context struct {
+	// Valid for all hooks
+	UUID     string
+	Unit     string
+	CharmDir string
+	HookName string
+
+	// Valid for relation-related hooks.
+	RelationName string
+	RelationId   string
+	RemoteUnit   string
+
+	jujucContextId string
+	jujucClient    *rpc.Client
+	localState     map[string]localState
+}
+
+func (ctxt *Context) stateDir() string {
+	return filepath.Join(ctxt.CharmDir, "localstate")
+}
+
+// LocalState reads charm local state for the given name, which should
+// be valid to use as a file name, and uses it to fill out the value
+// pointed to by ptr, which should be marshallable and unmarshallable as
+// JSON. When the hook has completed, the value will be saved back to
+// the same place, enabling persistent state to be saved.
+//
+// LocalState will panic if it is called twice for the same name in the
+// same hook execution.
+func (ctxt *Context) LocalState(name string, ptr interface{}) error {
+	if _, ok := ctxt.localState[name]; ok {
+		panic(errors.Newf("LocalState called twice for %q", name))
+	}
+	state := localState{
+		path: filepath.Join(ctxt.stateDir(), name),
+		ptr:  ptr,
+	}
+	data, err := ioutil.ReadFile(state.path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return errors.Wrap(err)
+		}
+		state.new = true
+		ctxt.localState[name] = state
+		return nil
+	}
+	if err := json.Unmarshal(data, ptr); err != nil {
+		return errors.Wrap(err)
+	}
+	ctxt.localState[name] = state
+	return nil
+}
+
+// SaveState saves the state of all the values passed to LocalState.
+func (ctxt *Context) SaveState() error {
+	if err := os.MkdirAll(ctxt.stateDir(), 0700); err != nil {
+		return errors.Wrap(err)
+	}
+	for name, state := range ctxt.localState {
+		data, err := json.Marshal(state.ptr)
+		if err != nil {
+			return errors.Wrapf(err, "could not marshal state %q", name)
+		}
+		if err := ioutil.WriteFile(state.path, data, 0600); err != nil {
+			return errors.Wrapf(err, "could not save state %q to %q", name, state.path)
+		}
+	}
+	return nil
+}
 
 func (ctxt *Context) IsRelationHook() bool {
 	return ctxt.RelationName != ""
@@ -178,7 +257,7 @@ func (ctxt *Context) run(cmd string, args ...string) (stdout []byte, err error) 
 		CommandName: cmd,
 		Args:        args,
 	}
-	log.Printf("run req %#v", req)
+	// log.Printf("run req %#v", req)
 	var resp jujuc.Response
 	err = ctxt.jujucClient.Call("Jujuc.Main", req, &resp)
 	if err != nil {
