@@ -14,7 +14,6 @@ import (
 
 type HookSuite struct {
 	sockPath  string
-	ctxt      *hook.Context
 	srvCtxt   *ServerContext
 	server    *jujuc.Server
 	err       chan error
@@ -25,9 +24,9 @@ type HookSuite struct {
 var _ = gc.Suite(&HookSuite{})
 
 // StartServer starts the jujuc server going with the
-// given relation id and remote unit.
+// given relation id and remote unit and sets
+// up the environment for hook.NewContext.
 // The server context is stored in s.srvCtxt.
-// The hook context is stored in s.ctxt.
 func (s *HookSuite) StartServer(c *gc.C, relid int, remote string) {
 	// can't start server twice.
 	c.Assert(s.server, gc.IsNil)
@@ -64,8 +63,6 @@ func (s *HookSuite) StartServer(c *gc.C, relid int, remote string) {
 		s.setenv("JUJU_RELATION_ID", r.FakeId())
 		s.setenv("JUJU_REMOTE_UNIT", remoteName)
 	}
-	s.ctxt, err = hook.NewContext()
-	c.Assert(err, gc.IsNil)
 }
 
 func (s *HookSuite) SetUpTest(c *gc.C) {
@@ -81,8 +78,6 @@ func (s *HookSuite) TearDownTest(c *gc.C) {
 		delete(s.savedVars, key)
 	}
 	if s.server != nil {
-		err := s.ctxt.Close()
-		c.Check(err, gc.IsNil)
 		s.server.Close()
 		c.Assert(<-s.err, gc.IsNil)
 		s.server = nil
@@ -99,24 +94,28 @@ func (s *HookSuite) setenv(key, val string) {
 
 func (s *HookSuite) TestSimple(c *gc.C) {
 	s.StartServer(c, 0, "peer0/0")
+	os.Args = []string{"runhook", "peer-relation-changed"}
+	ctxt, err := hook.NewContext()
+	c.Assert(err, gc.IsNil)
+	defer ctxt.Close()
 
-	c.Check(s.ctxt.HookName, gc.Equals, "peer-relation-changed")
-	c.Check(s.ctxt.UUID, gc.Equals, "fff.fff.fff")
-	c.Check(s.ctxt.Unit, gc.Equals, "local/55")
-	c.Check(s.ctxt.CharmDir, gc.Matches, ".*/charmdir")
-	c.Check(s.ctxt.RelationName, gc.Equals, "peer0")
-	c.Check(s.ctxt.RelationId, gc.Equals, "peer0:0")
-	c.Check(s.ctxt.RemoteUnit, gc.Equals, "peer0/0")
+	c.Check(ctxt.HookName, gc.Equals, "peer-relation-changed")
+	c.Check(ctxt.UUID, gc.Equals, "fff.fff.fff")
+	c.Check(ctxt.Unit, gc.Equals, "local/55")
+	c.Check(ctxt.CharmDir, gc.Matches, ".*/charmdir")
+	c.Check(ctxt.RelationName, gc.Equals, "peer0")
+	c.Check(ctxt.RelationId, gc.Equals, "peer0:0")
+	c.Check(ctxt.RemoteUnit, gc.Equals, "peer0/0")
 
 	// should really check false but annoying to do
 	// and too trivial to be worth it.
-	c.Assert(s.ctxt.IsRelationHook(), gc.Equals, true)
+	c.Assert(ctxt.IsRelationHook(), gc.Equals, true)
 
-	addr, err := s.ctxt.PrivateAddress()
+	addr, err := ctxt.PrivateAddress()
 	c.Check(err, gc.IsNil)
 	c.Check(addr, gc.Equals, "192.168.0.99")
 
-	addr, err = s.ctxt.PublicAddress()
+	addr, err = ctxt.PublicAddress()
 	c.Check(err, gc.IsNil)
 	c.Check(addr, gc.Equals, "gimli.minecraft.example.com")
 }
@@ -129,27 +128,28 @@ func (s *HookSuite) TestSimple(c *gc.C) {
 
 func (s *HookSuite) TestLocalState(c *gc.C) {
 	s.StartServer(c, 0, "peer0/0")
+	ctxt := s.newContext(c, "peer-relation-changed")
+	defer ctxt.Close()
 
 	type fooState struct {
 		Foo int
 		Bar string
 	}
 	var state fooState
-	err := s.ctxt.LocalState("foo", &state)
+	err := ctxt.LocalState("foo", &state)
 	c.Assert(err, gc.IsNil)
 	c.Assert(state, gc.Equals, fooState{})
 
 	c.Assert(func() {
-		s.ctxt.LocalState("foo", &state)
+		ctxt.LocalState("foo", &state)
 	}, gc.PanicMatches, "LocalState called twice for \".*/localstate/foo.json\"")
 
 	state.Foo = 88
 	state.Bar = "xxx"
-	err = s.ctxt.SaveState()
+	err = ctxt.SaveState()
 	c.Assert(err, gc.IsNil)
 
-	ctxt, err := hook.NewContext()
-	c.Assert(err, gc.IsNil)
+	ctxt = s.newContext(c, "peer-relation-changed")
 	defer ctxt.Close()
 
 	var newState fooState
@@ -161,70 +161,93 @@ func (s *HookSuite) TestLocalState(c *gc.C) {
 	err = ctxt.SaveState()
 	c.Assert(err, gc.IsNil)
 
-	data, err := ioutil.ReadFile(filepath.Join(s.ctxt.CharmDir, "localstate", "foo.json"))
+	data, err := ioutil.ReadFile(filepath.Join(ctxt.CharmDir, "localstate", "foo.json"))
 	c.Assert(err, gc.IsNil)
 	c.Assert(string(data), gc.Equals, `{"Foo":88,"Bar":"xxx"}`)
 }
 
+func (s *HookSuite) newContext(c *gc.C, args ...string) *hook.Context {
+	os.Args = append([]string{"runhook"}, args...)
+	ctxt, err := hook.NewContext()
+	c.Assert(err, gc.IsNil)
+	return ctxt
+}
+
 func (s *HookSuite) TestGetRelation(c *gc.C) {
 	s.StartServer(c, 0, "peer0/0")
+	ctxt := s.newContext(c, "peer-relation-changed")
+	defer ctxt.Close()
 
-	val, err := s.ctxt.GetRelation("private-address")
+	val, err := ctxt.GetRelation("private-address")
 	c.Assert(err, gc.IsNil)
 	c.Assert(val, gc.Equals, "peer0-0.example.com")
 }
 
 func (s *HookSuite) TestGetRelationUnit(c *gc.C) {
 	s.StartServer(c, 0, "peer0/0")
+	ctxt := s.newContext(c, "peer-relation-changed")
+	defer ctxt.Close()
 
-	val, err := s.ctxt.GetRelationUnit("peer1:1", "peer1/1", "private-address")
+	val, err := ctxt.GetRelationUnit("peer1:1", "peer1/1", "private-address")
 	c.Assert(err, gc.IsNil)
 	c.Assert(val, gc.Equals, "peer1-1.example.com")
 }
 
 func (s *HookSuite) TestGetRelationUnitUnknown(c *gc.C) {
 	s.StartServer(c, 0, "peer0/0")
-	val, err := s.ctxt.GetRelationUnit("unknown:99", "peer1/1", "private-address")
+	ctxt := s.newContext(c, "peer-relation-changed")
+	defer ctxt.Close()
+	val, err := ctxt.GetRelationUnit("unknown:99", "peer1/1", "private-address")
 	c.Check(val, gc.Equals, "")
 	c.Assert(err, gc.ErrorMatches, `invalid value "unknown:99" for flag -r: unknown relation id`)
 }
 
 func (s *HookSuite) TestGetAllRelation(c *gc.C) {
 	s.StartServer(c, 0, "peer0/0")
+	ctxt := s.newContext(c, "peer-relation-changed")
+	defer ctxt.Close()
 
-	val, err := s.ctxt.GetAllRelation()
+	val, err := ctxt.GetAllRelation()
 	c.Assert(err, gc.IsNil)
 	c.Assert(val, gc.DeepEquals, map[string]string{"private-address": "peer0-0.example.com"})
 }
 
 func (s *HookSuite) TestGetAllRelationUnit(c *gc.C) {
 	s.StartServer(c, 0, "peer0/0")
+	ctxt := s.newContext(c, "peer-relation-changed")
+	defer ctxt.Close()
 
-	val, err := s.ctxt.GetAllRelationUnit("peer1:1", "peer1/1")
+	val, err := ctxt.GetAllRelationUnit("peer1:1", "peer1/1")
 	c.Assert(err, gc.IsNil)
 	c.Assert(val, gc.DeepEquals, map[string]string{"private-address": "peer1-1.example.com"})
 }
 
 func (s *HookSuite) TestRelationIds(c *gc.C) {
 	s.StartServer(c, 0, "peer0/0")
+	ctxt := s.newContext(c, "peer-relation-changed")
+	defer ctxt.Close()
 
-	val, err := s.ctxt.RelationIds("peer0")
+	val, err := ctxt.RelationIds("peer0")
 	c.Assert(err, gc.IsNil)
 	c.Assert(val, gc.DeepEquals, []string{"peer0:0"})
 }
 
 func (s *HookSuite) TestRelationUnits(c *gc.C) {
 	s.StartServer(c, 0, "peer0/0")
+	ctxt := s.newContext(c, "peer-relation-changed")
+	defer ctxt.Close()
 
-	val, err := s.ctxt.RelationUnits("peer1:1")
+	val, err := ctxt.RelationUnits("peer1:1")
 	c.Assert(err, gc.IsNil)
 	c.Assert(val, gc.DeepEquals, []string{"peer1/0", "peer1/1"})
 }
 
 func (s *HookSuite) TestAllRelationUnits(c *gc.C) {
 	s.StartServer(c, 0, "peer0/0")
+	ctxt := s.newContext(c, "peer-relation-changed")
+	defer ctxt.Close()
 
-	val, err := s.ctxt.AllRelationUnits("peer0")
+	val, err := ctxt.AllRelationUnits("peer0")
 	c.Assert(err, gc.IsNil)
 	c.Assert(val, gc.DeepEquals, map[string][]string{
 		"peer0:0": {"peer0/0", "peer0/1"},
@@ -233,20 +256,24 @@ func (s *HookSuite) TestAllRelationUnits(c *gc.C) {
 
 func (s *HookSuite) TestGetConfig(c *gc.C) {
 	s.StartServer(c, 0, "peer0/0")
+	ctxt := s.newContext(c, "peer-relation-changed")
+	defer ctxt.Close()
 
-	val, err := s.ctxt.GetConfig("spline-reticulation")
+	val, err := ctxt.GetConfig("spline-reticulation")
 	c.Assert(err, gc.IsNil)
 	c.Assert(val, gc.Equals, 45.0)
 
-	val, err = s.ctxt.GetConfig("unknown")
+	val, err = ctxt.GetConfig("unknown")
 	c.Assert(err, gc.IsNil)
 	c.Assert(val, gc.Equals, nil)
 }
 
 func (s *HookSuite) TestGetAllConfig(c *gc.C) {
 	s.StartServer(c, 0, "peer0/0")
+	ctxt := s.newContext(c, "peer-relation-changed")
+	defer ctxt.Close()
 
-	val, err := s.ctxt.GetAllConfig()
+	val, err := ctxt.GetAllConfig()
 	c.Assert(err, gc.IsNil)
 	c.Assert(val, gc.DeepEquals, map[string]interface{}{
 		"monsters":            false,
@@ -291,17 +318,73 @@ func (s *HookSuite) TestMain(c *gc.C) {
 	c.Assert(localState, gc.Equals, "value")
 }
 
-func (s *HookSuite) TestMainCallsMainFunc(c *gc.C) {
-	os.Args = []string{"exe", "main", "arg1", "arg2"}
+func (s *HookSuite) TestMainWithEmptyRegistry(c *gc.C) {
 	err := hook.Main(hook.NewRegistry())
-	c.Assert(err, gc.ErrorMatches, "no main function registered")
-	var callArgs []string
-	hook.MainFunc = func() {
-		callArgs = append(callArgs, os.Args...)
+	c.Assert(err, gc.ErrorMatches, "no registered hooks or commands")
+}
+
+func (s *HookSuite) TestMainUsage(c *gc.C) {
+	r := hook.NewRegistry()
+	r.RegisterCommand("server", func(){})
+	r.RegisterCommand("client",  func(){})
+	r.Register("peer-relation-changed", func(*hook.Context) error {return nil})
+	r.Register("config-changed", func(*hook.Context) error {return nil})
+	os.Args = []string{"exe"}
+	err := hook.Main(r)
+	c.Assert(err, gc.ErrorMatches, `usage: runhook cmd-server \[arg\.\.\.]
+	| runhook cmd-client \[arg\.\.\.]
+	| runhook config-changed
+	| runhook peer-relation-changed`)
+}
+
+func (s *HookSuite) TestCommandCall(c *gc.C) {
+	s.StartServer(c, 0, "peer0/0")
+
+	r := hook.NewRegistry()
+	callArgs := make(map[string] []string)
+	cmdFunc := func(name string) func() {
+		return func() {
+			callArgs[name] = append([]string{}, os.Args...)
+		}
 	}
-	err = hook.Main(hook.NewRegistry())
+		
+	r.RegisterCommand("main", cmdFunc("main"))
+	r.RegisterCommand("other", cmdFunc("other"))
+	r1 := r.NewRegistry("sub")
+	r1.RegisterCommand("main", cmdFunc("main-sub"))
+
+	var cmdNames []string
+	r.Register("install", func(ctxt *hook.Context) error {
+		cmdNames = append(cmdNames,
+			ctxt.CommandName("main"),
+			ctxt.CommandName("other"),
+		)
+		return nil
+	})
+	r1.Register("install", func(ctxt *hook.Context) error {
+		cmdNames = append(cmdNames,
+			ctxt.CommandName("main"),
+		)
+		return nil
+	})
+	// invoke install hook, so we can find out the
+	// reported command names.,
+	os.Args = []string{"exe", "install"}
+	err := hook.Main(r)
 	c.Assert(err, gc.IsNil)
-	c.Assert(callArgs, gc.DeepEquals, []string{"exe", "arg1", "arg2"})
+	c.Assert(cmdNames, gc.HasLen, 3)
+
+	for _, name := range cmdNames {
+		os.Args = []string{"exe", name, "arg1", "arg2"}
+		err := hook.Main(r)
+		c.Assert(err, gc.IsNil)
+	}
+
+	c.Assert(callArgs, gc.DeepEquals, map[string][]string{
+		"main": {"exe", "arg1", "arg2"},
+		"other": {"exe", "arg1", "arg2"},
+		"main-sub": {"exe", "arg1", "arg2"},
+	})
 }
 
 type localState struct {
@@ -382,6 +465,9 @@ func (s *HookSuite) TestHierarchicalLocalState(c *gc.C) {
 
 func (s *HookSuite) TestMainWithUnregisteredHook(c *gc.C) {
 	s.StartServer(c, 0, "peer0/0")
-	err := hook.Main(hook.NewRegistry())
-	c.Assert(err, gc.ErrorMatches, `hook "peer-relation-changed" not registered`)
+	r := hook.NewRegistry()
+	r.Register("install", func(*hook.Context)error{ return nil})
+	os.Args = []string{"exe", "peer-relation-changed"}
+	err := hook.Main(r)
+	c.Assert(err, gc.ErrorMatches, `usage: runhook install`)
 }

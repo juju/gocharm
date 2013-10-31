@@ -1,6 +1,9 @@
 package hook
 
 import (
+	"fmt"
+	"sort"
+	"strings"
 	"launchpad.net/errgo/errors"
 	"net/rpc"
 	"os"
@@ -16,12 +19,14 @@ type hookFunc struct {
 type Registry struct {
 	localStateName string
 	hooks          map[string][]hookFunc
+	commands	map[string]func()
 }
 
 // NewRegistry returns a new hook registry.
 func NewRegistry() *Registry {
 	return &Registry{
 		hooks: make(map[string][]hookFunc),
+		commands: make(map[string]func()),
 	}
 }
 
@@ -45,14 +50,24 @@ func (r *Registry) Register(name string, f func(ctxt *Context) error) {
 	})
 }
 
-// MainFunc will be called by Main if not nil and the runhook executable
-// is invoked with "main" as its first argument. os.Args be changed to
-// exclude the original first argument, so this function can be written
-// as if it was a regular main function.
+// RegisterCommand registers the given function to be called
+// when the hook is invoked with a first argument of "cmd".
+// The name is relative to the registry's state namespace.
+// It will panic if the same name is registered more than
+// once in the same Registry.
 //
-// This enables a runhook executable to build in other functionality
-// that is not directly executed as part of a hook.
-var MainFunc func()
+// When the function is called, os.Args will be set up as
+// if the function is main - the "cmd-" command selector
+// will be removed.
+func (r *Registry) RegisterCommand(name string, f func()) {
+	// TODO check that name is vaid (non-empty, no slashes)
+
+	name = filepath.Join(r.localStateName, name)
+	if r.commands[name] != nil {
+		panic(errors.Newf("command %q is already registered", name))
+	}
+	r.commands[name] = f
+}
 
 // NewRegistry returns a sub-registry of r. Local state
 // stored by hooks registered with that will be stored relative to the
@@ -65,6 +80,7 @@ func (r *Registry) NewRegistry(localStateName string) *Registry {
 	return &Registry{
 		localStateName: filepath.Join(r.localStateName, localStateName),
 		hooks:          r.hooks,
+		commands: r.commands,
 	}
 }
 
@@ -103,22 +119,38 @@ var relationEnvVars = []string{
 	envRemoteUnit,
 }
 
-// Main creates a new context from the environment
-// and invokes the appropriate hook function registered
-// in the given registry.
-// It expects to find the hook name in os.Args[1]; this
-// may also be "main" in which case it will invoke MainFunc.
-func Main(r *Registry) error {
-	if len(os.Args) < 2 {
-		return errors.New("usage: runhook hook-name|main [mainargs...]")
+func usageError(r *Registry) error {
+	var allowed []string
+	for cmd := range r.commands {
+		allowed = append(allowed, "cmd-" + cmd + " [arg...]")
 	}
-	if os.Args[1] == "main" {
-		if MainFunc == nil {
-			return errors.New("no main function registered")
+	for hook := range r.hooks {
+		allowed = append(allowed, hook)
+	}
+	sort.Strings(allowed[0:len(r.commands)])
+	sort.Strings(allowed[len(r.commands):])
+	return errors.Newf("usage: runhook %s", strings.Join(allowed, "\n\t| runhook "))
+}
+
+// Main creates a new context from the environment and invokes the
+// appropriate hook function or command registered in the given
+// registry (or a registry created from it).
+func Main(r *Registry) error {
+	if len(r.hooks) == 0 && len(r.commands) == 0 {
+		return fmt.Errorf("no registered hooks or commands")
+	}
+	if len(os.Args) < 2 {
+		return usageError(r)
+	}
+	if strings.HasPrefix(os.Args[1], "cmd-") {
+		cmdName := strings.TrimPrefix(os.Args[1], "cmd-")
+		cmd := r.commands[cmdName]
+		if cmd == nil {
+			return usageError(r)
 		}
-		// Elide "main" argument.
+		// Elide the command name argument.
 		os.Args = append(os.Args[:1], os.Args[2:]...)
-		MainFunc()
+		cmd()
 		return nil
 	}
 	ctxt, err := NewContext()
@@ -128,7 +160,8 @@ func Main(r *Registry) error {
 	defer ctxt.Close()
 	hookFuncs, ok := r.hooks[ctxt.HookName]
 	if !ok {
-		return errors.Newf("hook %q not registered", ctxt.HookName)
+		ctxt.Logf("hook %q not registered", ctxt.HookName)
+		return usageError(r)
 	}
 	for _, f := range hookFuncs {
 		ctxt.localStateName = f.localStateName

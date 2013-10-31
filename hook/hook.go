@@ -92,6 +92,17 @@ func (ctxt *Context) SaveState() error {
 	return nil
 }
 
+// CommandName returns a value that can be used to
+// make runhook run the given command when passed
+// as its first argument.
+// The command name is relative to the registry
+// from which ctxt was created.
+// TODO better explanation and an example.
+func (ctxt *Context) CommandName(name string) string {
+	// TODO panic if name is empty?
+	return filepath.Join("cmd-" + filepath.Join(ctxt.localStateName, name))
+}
+
 func (ctxt *Context) IsRelationHook() bool {
 	return ctxt.RelationName != ""
 }
