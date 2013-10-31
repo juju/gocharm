@@ -45,10 +45,10 @@ func (r *Registry) Register(name string, f func(ctxt *Context) error) {
 	})
 }
 
-// NewRegistry returns a sub-registry of the receiver. Local state
+// NewRegistry returns a sub-registry of r. Local state
 // stored by hooks registered with that will be stored relative to the
-// given name; likewise new registries created by NewRegistry on it will
-// store local state relatively.
+// given name within r; likewise new registries created by NewRegistry
+// on it will store local state relatively to r.
 //
 // This enables hierarchical local storage for charm hooks.
 func (r *Registry) NewRegistry(localStateName string) *Registry {
