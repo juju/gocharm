@@ -234,6 +234,8 @@ func (ctxt *Context) SetRelationWithId(relationId string, keyvals ...string) err
 	return errors.Wrap(err)
 }
 
+// GetConfig returns the charm configuration value for the given
+// key. Both int- and float-typed values will be returned as float64.
 func (ctxt *Context) GetConfig(key string) (interface{}, error) {
 	var val interface{}
 	if err := ctxt.runJson(&val, "config-get", "--format", "json", "--", key); err != nil {
