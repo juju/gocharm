@@ -3,6 +3,7 @@ package hook_test
 import (
 	"fmt"
 	"io/ioutil"
+	"launchpad.net/errgo/errors"
 	gc "launchpad.net/gocheck"
 	"launchpad.net/juju-core/cmd"
 	"launchpad.net/juju-core/worker/uniter/jujuc"
@@ -71,7 +72,7 @@ func (s *HookSuite) SetUpTest(c *gc.C) {
 	c.Assert(s.savedVars, gc.HasLen, 0)
 	s.savedVars = make(map[string]string)
 	s.savedArgs = os.Args
-	os.Args = []string{os.Args[0], "peer-relation-changed"}
+	os.Args = []string{"hook-test", "peer-relation-changed"}
 }
 
 func (s *HookSuite) TearDownTest(c *gc.C) {
@@ -288,6 +289,82 @@ func (s *HookSuite) TestMain(c *gc.C) {
 	err = ctxt.LocalState("x", &localState)
 	c.Assert(err, gc.IsNil)
 	c.Assert(localState, gc.Equals, "value")
+}
+
+type localState struct {
+	CallCount int
+	Name      string
+}
+
+var latestState = make(map[string]localState)
+
+func localStateHookFunc(name string) func(*hook.Context) error {
+	return func(ctxt *hook.Context) error {
+		var state localState
+		if err := ctxt.LocalState(name, &state); err != nil {
+			return errors.Wrap(err)
+		}
+		if state.Name != name && state.Name != "" {
+			panic(errors.Newf("unexpected name in state: %q; expected %q", state.Name, name))
+		}
+		state.Name = name
+		state.CallCount++
+		latestState[name] = state
+		return nil
+	}
+}
+
+func registerLevel1(name string, r *hook.Registry) {
+	r.Register("config-changed", localStateHookFunc(name+"-0"))
+	r.Register("peer-relation-changed", localStateHookFunc(name+"-0"))
+}
+
+func registerLevel0(r *hook.Registry) {
+	registerLevel1("level1-0", r.NewRegistry("level1-0"))
+	registerLevel1("level1-1", r.NewRegistry("level1-1"))
+	r.Register("config-changed", localStateHookFunc("level0-config"))
+	r.Register("other-relation-changed", localStateHookFunc("level0-other"))
+}
+
+func (s *HookSuite) TestHierarchicalLocalState(c *gc.C) {
+	latestState = make(map[string]localState)
+
+	s.StartServer(c, 0, "peer0/0")
+
+	r := hook.NewRegistry()
+	registerLevel0(r)
+	os.Args = []string{"", "config-changed"}
+	for i := 0; i < 3; i++ {
+		err := hook.Main(r)
+		c.Assert(err, gc.IsNil)
+	}
+	os.Args = []string{"", "peer-relation-changed"}
+	for i := 0; i < 2; i++ {
+		err := hook.Main(r)
+		c.Assert(err, gc.IsNil)
+	}
+	os.Args = []string{"", "other-relation-changed"}
+	err := hook.Main(r)
+	c.Assert(err, gc.IsNil)
+
+	c.Assert(latestState, gc.DeepEquals, map[string]localState{
+		"level1-0-0": {
+			CallCount: 5,
+			Name:      "level1-0-0",
+		},
+		"level1-1-0": {
+			CallCount: 5,
+			Name:      "level1-1-0",
+		},
+		"level0-config": {
+			CallCount: 3,
+			Name:      "level0-config",
+		},
+		"level0-other": {
+			CallCount: 1,
+			Name:      "level0-other",
+		},
+	})
 }
 
 func (s *HookSuite) TestMainWithUnregisteredHook(c *gc.C) {
