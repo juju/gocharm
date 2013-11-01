@@ -2,6 +2,8 @@
 // http server. The port of the server is configured with the
 // "server-port" charm configuration option, which should
 // be added to config.yaml with integer type.
+//
+// This package is currently highly experimental.
 package httpserver
 
 import (
@@ -39,7 +41,8 @@ type server struct {
 }
 
 // Register registers the handlers and commands necessary for
-// starting an http server in a charm.
+// starting an http server in a charm that will serve content
+// using the handler created by calling newHandler.
 func Register(r *hook.Registry, newHandler func() http.Handler) {
 	register := func(hookName string, f func(*server) error) {
 		r.Register(hookName, func(ctxt *hook.Context) error {
