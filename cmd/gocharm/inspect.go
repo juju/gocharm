@@ -22,6 +22,9 @@ func writeHooks(dir *charm.Dir, hooks map[string]bool) error {
 		log.Printf("writing hooks in %s", dir.Path)
 	}
 	hookDir := filepath.Join(dir.Path, "hooks")
+	if err := os.MkdirAll(hookDir, 0777); err != nil {
+		return errors.Wrapf(err, "failed to make hooks directory")
+	}
 	infos, err := ioutil.ReadDir(hookDir)
 	if err != nil {
 		return errors.Wrap(err)

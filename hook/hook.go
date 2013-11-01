@@ -63,12 +63,10 @@ func (ctxt *Context) withLocalStateName(localStateName string) *Context {
 	}
 }
 
-// ContextGetter returns a function that transforms an existing
+// LocalContext transforms an existing
 // context into a context with state local to r.
-func (r *Registry) ContextGetter() func(*Context) *Context {
-	return func(ctxt *Context) *Context {
-		return ctxt.withLocalStateName(r.localStateName)
-	}
+func (r *Registry) LocalContext(ctxt *Context) *Context {
+	return ctxt.withLocalStateName(r.localStateName)
 }
 
 // hookStateDir is where hook local state will be stored.
