@@ -17,8 +17,23 @@ import (
 	"strings"
 )
 
-// Context provides the context for a running Juju hook.
-type Context struct {
+// TODO make it easy to derive one context from another one (changing
+// the localStateName) while keeping the underlying context.
+// Perhaps refcount
+
+type internalContext struct {
+	info           ContextInfo
+	jujucContextId string
+	jujucClient    *rpc.Client
+
+	// localState maps from file path to the data to be
+	// stored there.
+	localState map[string]reflect.Value
+}
+
+// ContextInfo provides information about the
+// context. It should be treated as read-only.
+type ContextInfo struct {
 	// Valid for all hooks
 	UUID     string
 	Unit     string
@@ -29,15 +44,31 @@ type Context struct {
 	RelationName string
 	RelationId   string
 	RemoteUnit   string
+}
 
-	jujucContextId string
-	jujucClient    *rpc.Client
-
-	// localState maps from file path to the data to be
-	// stored there.
-	localState map[string]reflect.Value
-
+// Context provides the context for a running Juju hook.
+type Context struct {
+	*ContextInfo
 	localStateName string
+	*internalContext
+}
+
+// withLocalStateName returns a Context that's the same as
+// ctxt but uses the given local state.
+func (ctxt *Context) withLocalStateName(localStateName string) *Context {
+	return &Context{
+		localStateName:  localStateName,
+		ContextInfo:     &ctxt.info,
+		internalContext: ctxt.internalContext,
+	}
+}
+
+// ContextGetter returns a function that transforms an existing
+// context into a context with state local to r.
+func (r *Registry) ContextGetter() func(*Context) *Context {
+	return func(ctxt *Context) *Context {
+		return ctxt.withLocalStateName(r.localStateName)
+	}
 }
 
 // hookStateDir is where hook local state will be stored.

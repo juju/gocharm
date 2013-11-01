@@ -158,11 +158,11 @@ func Main(r *Registry) (err error) {
 		cmd()
 		return nil
 	}
-	ctxt, err := NewContext()
+	ctxt, err := newContext()
 	if err != nil {
 		return errors.Wrap(err)
 	}
-	defer ctxt.Close()
+	defer ctxt.close()
 	defer func() {
 		// Save the state after all hooks have been run.
 		if saveErr := ctxt.saveState(); saveErr != nil {
@@ -179,7 +179,7 @@ func Main(r *Registry) (err error) {
 		return usageError(r)
 	}
 	for _, f := range hookFuncs {
-		ctxt.localStateName = f.localStateName
+		ctxt := ctxt.withLocalStateName(f.localStateName)
 		if err := f.run(ctxt); err != nil {
 			// TODO better error context here, perhaps
 			// including local state name, hook name, etc.
@@ -188,7 +188,6 @@ func Main(r *Registry) (err error) {
 	}
 	if ctxt.HookName == "stop" {
 		// We've shut down, so clean up all our local state.
-		ctxt.localStateName = ""
 		if err := os.RemoveAll(ctxt.StateDir()); err != nil {
 			return errors.Wrapf(err, "cannot remove local state")
 		}
@@ -196,13 +195,8 @@ func Main(r *Registry) (err error) {
 	return nil
 }
 
-// NewContext creates a hook context from the current environment.
-// Clients should not use this function, but use their init functions to
-// call Register to register a hook function instead, which enables
-// gocharm to generate hook stubs automatically.
-//
-// Local state will be stored relative to the given localStateName.
-func NewContext() (*Context, error) {
+// newContext creates a hook context from the current environment.
+func newContext() (*Context, error) {
 	vars := mustEnvVars
 	if os.Getenv(envRelationName) != "" {
 		vars = append(vars, relationEnvVars...)
@@ -216,14 +210,16 @@ func NewContext() (*Context, error) {
 		return nil, errors.New("one argument required")
 	}
 	hookName := os.Args[1]
-	ctxt := &Context{
-		UUID:           os.Getenv(envUUID),
-		Unit:           os.Getenv(envUnitName),
-		CharmDir:       os.Getenv(envCharmDir),
-		RelationName:   os.Getenv(envRelationName),
-		RelationId:     os.Getenv(envRelationId),
-		RemoteUnit:     os.Getenv(envRemoteUnit),
-		HookName:       hookName,
+	internalCtxt := &internalContext{
+		info: ContextInfo{
+			UUID:         os.Getenv(envUUID),
+			Unit:         os.Getenv(envUnitName),
+			CharmDir:     os.Getenv(envCharmDir),
+			RelationName: os.Getenv(envRelationName),
+			RelationId:   os.Getenv(envRelationId),
+			RemoteUnit:   os.Getenv(envRemoteUnit),
+			HookName:     hookName,
+		},
 		jujucContextId: os.Getenv(envJujuContextId),
 		localState:     make(map[string]reflect.Value),
 	}
@@ -231,11 +227,14 @@ func NewContext() (*Context, error) {
 	if err != nil {
 		return nil, errors.Newf("cannot dial uniter: %v", err)
 	}
-	ctxt.jujucClient = client
-	return ctxt, nil
+	internalCtxt.jujucClient = client
+	return &Context{
+		ContextInfo:     &internalCtxt.info,
+		internalContext: internalCtxt,
+	}, nil
 }
 
 // Close closes the context's connection to the unit agent.
-func (ctxt *Context) Close() error {
+func (ctxt *internalContext) close() error {
 	return ctxt.jujucClient.Close()
 }

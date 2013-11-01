@@ -166,6 +166,8 @@ func processGoCharm(dir *charm.Dir) (doneSomething bool, err error) {
 	if err != nil {
 		return false, errors.Wrap(err)
 	}
+	// We always want to generate a stop hook.
+	hooks["stop"] = true
 	if err := writeHooks(dir, hooks); err != nil {
 		return false, errors.Wrapf(err, "cannot write hooks to charm")
 	}
