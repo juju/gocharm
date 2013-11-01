@@ -6,6 +6,7 @@ import (
 	"net/rpc"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 )
@@ -127,15 +128,19 @@ func usageError(r *Registry) error {
 	for hook := range r.hooks {
 		allowed = append(allowed, hook)
 	}
+	// The stop hook is always allowed.
+	if r.hooks["stop"] == nil {
+		allowed = append(allowed, "stop")
+	}
 	sort.Strings(allowed[0:len(r.commands)])
 	sort.Strings(allowed[len(r.commands):])
 	return errors.Newf("usage: runhook %s", strings.Join(allowed, "\n\t| runhook "))
 }
 
 // Main creates a new context from the environment and invokes the
-// appropriate hook function or command registered in the given
-// registry (or a registry created from it).
-func Main(r *Registry) error {
+// appropriate command or hook functions from the given
+// registry or sub-registries of it.
+func Main(r *Registry) (err error) {
 	if len(r.hooks) == 0 && len(r.commands) == 0 {
 		return fmt.Errorf("no registered hooks or commands")
 	}
@@ -158,33 +163,37 @@ func Main(r *Registry) error {
 		return errors.Wrap(err)
 	}
 	defer ctxt.Close()
-	hookFuncs, ok := r.hooks[ctxt.HookName]
-	if !ok {
-		ctxt.Logf("hook %q not registered", ctxt.HookName)
-		return usageError(r)
-	}
-	for _, f := range hookFuncs {
-		ctxt.localStateName = f.localStateName
-		if err := f.runHook(ctxt); err != nil {
-			// TODO better error context here, perhaps
-			// including local state name, hook name, etc.
-			return errors.Wrap(err)
-		}
-	}
-	return nil
-}
-
-func (f hookFunc) runHook(ctxt *Context) (err error) {
 	defer func() {
-		if saveErr := ctxt.SaveState(); saveErr != nil {
+		// Save the state after all hooks have been run.
+		if saveErr := ctxt.saveState(); saveErr != nil {
 			if err == nil {
-				err = saveErr
+				err = errors.Wrapf(saveErr, "cannot save local state")
 			} else {
 				ctxt.Logf("cannot save local state: %v", saveErr)
 			}
 		}
 	}()
-	return f.run(ctxt)
+	hookFuncs, ok := r.hooks[ctxt.HookName]
+	if !ok && ctxt.HookName != "stop" {
+		ctxt.Logf("hook %q not registered", ctxt.HookName)
+		return usageError(r)
+	}
+	for _, f := range hookFuncs {
+		ctxt.localStateName = f.localStateName
+		if err := f.run(ctxt); err != nil {
+			// TODO better error context here, perhaps
+			// including local state name, hook name, etc.
+			return errors.Wrap(err)
+		}
+	}
+	if ctxt.HookName == "stop" {
+		// We've shut down, so clean up all our local state.
+		ctxt.localStateName = ""
+		if err := os.RemoveAll(ctxt.StateDir()); err != nil {
+			return errors.Wrapf(err, "cannot remove local state")
+		}
+	}
+	return nil
 }
 
 // NewContext creates a hook context from the current environment.
@@ -216,7 +225,7 @@ func NewContext() (*Context, error) {
 		RemoteUnit:     os.Getenv(envRemoteUnit),
 		HookName:       hookName,
 		jujucContextId: os.Getenv(envJujuContextId),
-		localState:     make(map[string]interface{}),
+		localState:     make(map[string]reflect.Value),
 	}
 	client, err := rpc.Dial("unix", os.Getenv(envSocketPath))
 	if err != nil {

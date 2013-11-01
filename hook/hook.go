@@ -8,10 +8,12 @@ import (
 	"fmt"
 	"io/ioutil"
 	"launchpad.net/errgo/errors"
+	"launchpad.net/juju-core/names"
 	"launchpad.net/juju-core/worker/uniter/jujuc"
 	"net/rpc"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 )
 
@@ -33,56 +35,92 @@ type Context struct {
 
 	// localState maps from file path to the data to be
 	// stored there.
-	localState map[string]interface{}
+	localState map[string]reflect.Value
 
 	localStateName string
 }
 
-func (ctxt *Context) stateDir() string {
-	return filepath.Join(ctxt.CharmDir, "localstate", ctxt.localStateName)
+// hookStateDir is where hook local state will be stored.
+var hookStateDir = "/var/lib/juju-localstate"
+
+// StateDir returns the path to the directory where local state for the
+// given context will be stored. The directory is not guaranteed to
+// exist.
+func (ctxt *Context) StateDir() string {
+	return filepath.Join(hookStateDir, ctxt.UUID+"-"+ctxt.UnitTag(), ctxt.localStateName)
 }
 
-// LocalState reads charm local state for the given name, which should
-// be valid to use as a file name, and uses it to fill out the value
-// pointed to by ptr, which should be marshallable and unmarshallable as
-// JSON. When the hook has completed, the value will be saved back to
-// the same place, enabling persistent state to be saved.
+// LocalState reads charm local state for the given name (which should
+// be valid to use as a file name) and uses it to fill out the value
+// pointed to by ptr, which should be a pointer to a pointer to a type
+// that's marshallable and unmarshallable as JSON.
 //
-// LocalState will panic if it is called twice for the same name without
-// an intervening call to SaveState.
+// When the hook has completed, the value will be saved back to
+// the same place, making it persistent.
+//
+// The first time LocalState is called in a hook, the element pointed to
+// by ptr is allocated with new, and then filled by JSON unmarshalling,
+// or left zero if there's no existing state. When LocalState is
+// called again, the element pointed to by ptr will be set to
+// the previously allocated value.
+//
+// For example:
+//	func someHook(ctxt *hook.Context) error {
+//		type myState struct {
+//			Called int
+//		}
+//		var state *myState
+//		if err := ctxt.LocalState(&state, "some-hook"); err != nil {
+//			return err
+//		}
+//		if !state.Called {
+//			ctxt.Logf("someHook has never been called before")
+//		}
+//		state.Called = true
+//	}
+//
 func (ctxt *Context) LocalState(name string, ptr interface{}) error {
-	// TODO check that name is valid (no slash, no .json extension)
-	path := filepath.Join(ctxt.stateDir(), name) + ".json"
-	if _, ok := ctxt.localState[path]; ok {
-		panic(errors.Newf("LocalState called twice for %q", path))
+	ptrv := reflect.ValueOf(ptr)
+	ptrt := ptrv.Type()
+	if ptrt.Kind() != reflect.Ptr || ptrt.Elem().Kind() != reflect.Ptr {
+		panic(errors.Newf("LocalState requires pointer-to-pointer, not %s", ptrt))
 	}
-	data, err := ioutil.ReadFile(path)
-	if err != nil {
-		if !os.IsNotExist(err) {
-			return errors.Wrap(err)
+	// TODO check that name is valid (no slash, no .json extension)
+	path := filepath.Join(ctxt.StateDir(), name) + ".json"
+	if oldv, ok := ctxt.localState[path]; ok {
+		// There's already some previous state; set *ptr = oldv
+		if ptrt.Elem() != oldv.Type() {
+			panic(errors.Newf("LocalState called with inconsistent type %s (expected %s)", ptrt.Elem(), oldv.Type()))
 		}
-		ctxt.localState[path] = ptr
+		ptrv.Elem().Set(oldv)
 		return nil
 	}
-	if err := json.Unmarshal(data, ptr); err != nil {
+	v := reflect.New(ptrt.Elem().Elem())
+	data, err := ioutil.ReadFile(path)
+	if err == nil {
+		if err := json.Unmarshal(data, v.Interface()); err != nil {
+			return errors.Wrap(err)
+		}
+	} else if !os.IsNotExist(err) {
 		return errors.Wrap(err)
 	}
-	ctxt.localState[path] = ptr
+	ctxt.localState[path] = v
+	ptrv.Elem().Set(v)
 	return nil
 }
 
-// SaveState saves the state of all the values passed to LocalState.
-// If this succeeds, LocalState may be called again for any name.
-func (ctxt *Context) SaveState() error {
+// saveState saves the state of all the values that have been created
+// by LocalState.
+func (ctxt *Context) saveState() error {
 	made := make(map[string]bool)
-	for path, ptr := range ctxt.localState {
+	for path, val := range ctxt.localState {
 		if dir := filepath.Dir(path); !made[dir] {
 			if err := os.MkdirAll(dir, 0700); err != nil {
 				return errors.Wrap(err)
 			}
 			made[dir] = true
 		}
-		data, err := json.Marshal(ptr)
+		data, err := json.Marshal(val.Interface())
 		if err != nil {
 			return errors.Wrapf(err, "could not marshal state %q", path)
 		}
@@ -90,7 +128,6 @@ func (ctxt *Context) SaveState() error {
 			return errors.Wrapf(err, "could not save state to %q", path)
 		}
 	}
-	ctxt.localState = make(map[string]interface{})
 	return nil
 }
 
@@ -107,6 +144,12 @@ func (ctxt *Context) CommandName(name string) string {
 
 func (ctxt *Context) IsRelationHook() bool {
 	return ctxt.RelationName != ""
+}
+
+// UnitTag returns the tag of the current unit, useful for
+// using as a file name.
+func (ctxt *Context) UnitTag() string {
+	return names.UnitTag(ctxt.Unit)
 }
 
 func (ctxt *Context) OpenPort(proto string, port int) error {

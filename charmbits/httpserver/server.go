@@ -33,7 +33,7 @@ type serverState struct {
 }
 
 type server struct {
-	serverState
+	*serverState
 	ctxt           *hook.Context
 	configuredPort *int
 }

@@ -13,12 +13,13 @@ import (
 )
 
 type HookSuite struct {
-	sockPath  string
-	srvCtxt   *ServerContext
-	server    *jujuc.Server
-	err       chan error
-	savedVars map[string]string
-	savedArgs []string
+	sockPath          string
+	srvCtxt           *ServerContext
+	server            *jujuc.Server
+	err               chan error
+	savedVars         map[string]string
+	savedArgs         []string
+	savedHookStateDir string
 }
 
 var _ = gc.Suite(&HookSuite{})
@@ -69,7 +70,9 @@ func (s *HookSuite) SetUpTest(c *gc.C) {
 	c.Assert(s.savedVars, gc.HasLen, 0)
 	s.savedVars = make(map[string]string)
 	s.savedArgs = os.Args
-	os.Args = []string{"hook-test", "peer-relation-changed"}
+	os.Args = nil
+	s.savedHookStateDir = *hook.HookStateDir
+	*hook.HookStateDir = c.MkDir()
 }
 
 func (s *HookSuite) TearDownTest(c *gc.C) {
@@ -83,6 +86,7 @@ func (s *HookSuite) TearDownTest(c *gc.C) {
 		s.server = nil
 	}
 	os.Args = s.savedArgs
+	*hook.HookStateDir = s.savedHookStateDir
 }
 
 func (s *HookSuite) setenv(key, val string) {
@@ -135,14 +139,15 @@ func (s *HookSuite) TestLocalState(c *gc.C) {
 		Foo int
 		Bar string
 	}
-	var state fooState
+	var state *fooState
 	err := ctxt.LocalState("foo", &state)
 	c.Assert(err, gc.IsNil)
-	c.Assert(state, gc.Equals, fooState{})
+	c.Assert(state, gc.DeepEquals, &fooState{})
 
-	c.Assert(func() {
-		ctxt.LocalState("foo", &state)
-	}, gc.PanicMatches, "LocalState called twice for \".*/localstate/foo.json\"")
+	var state1 *fooState
+	err = ctxt.LocalState("foo", &state1)
+	c.Assert(err, gc.IsNil)
+	c.Assert(state1, gc.Equals, state)
 
 	state.Foo = 88
 	state.Bar = "xxx"
@@ -152,16 +157,16 @@ func (s *HookSuite) TestLocalState(c *gc.C) {
 	ctxt = s.newContext(c, "peer-relation-changed")
 	defer ctxt.Close()
 
-	var newState fooState
+	var newState *fooState
 	err = ctxt.LocalState("foo", &newState)
 	c.Assert(err, gc.IsNil)
-	c.Assert(newState, gc.Equals, state)
+	c.Assert(newState, gc.DeepEquals, state)
 
 	newState.Foo = 88
 	err = ctxt.SaveState()
 	c.Assert(err, gc.IsNil)
 
-	data, err := ioutil.ReadFile(filepath.Join(ctxt.CharmDir, "localstate", "foo.json"))
+	data, err := ioutil.ReadFile(filepath.Join(ctxt.StateDir(), "foo.json"))
 	c.Assert(err, gc.IsNil)
 	c.Assert(string(data), gc.Equals, `{"Foo":88,"Bar":"xxx"}`)
 }
@@ -292,19 +297,21 @@ func (s *HookSuite) TestRegister(c *gc.C) {
 }
 
 func (s *HookSuite) TestMain(c *gc.C) {
-	r := hook.NewRegistry()
 	s.StartServer(c, 0, "peer0/0")
 	called := false
+	r := hook.NewRegistry()
 	r.Register("peer-relation-changed", func(ctxt *hook.Context) error {
 		called = true
-		localState := "value"
+		var localState *string
 		err := ctxt.LocalState("x", &localState)
 		c.Check(err, gc.IsNil)
+		*localState = "value"
 		val, err := ctxt.GetRelationUnit("peer1:1", "peer1/1", "private-address")
 		c.Check(err, gc.IsNil)
 		c.Check(val, gc.Equals, "peer1-1.example.com")
 		return nil
 	})
+	os.Args = []string{"exe", "peer-relation-changed"}
 	err := hook.Main(r)
 	c.Assert(err, gc.IsNil)
 
@@ -312,10 +319,62 @@ func (s *HookSuite) TestMain(c *gc.C) {
 	ctxt, err := hook.NewContext()
 	c.Assert(err, gc.IsNil)
 	defer ctxt.Close()
-	var localState string
+	var localState *string
 	err = ctxt.LocalState("x", &localState)
 	c.Assert(err, gc.IsNil)
-	c.Assert(localState, gc.Equals, "value")
+	c.Assert(*localState, gc.Equals, "value")
+}
+
+func (s *HookSuite) TestMainFailsWhenCannotSaveState(c *gc.C) {
+	s.StartServer(c, 0, "peer0/0")
+	r := hook.NewRegistry()
+	r.Register("peer-relation-changed", func(ctxt *hook.Context) error {
+		var x *int
+		if err := ctxt.LocalState("x", &x); err != nil {
+			return errors.Wrap(err)
+		}
+		err := os.Chmod(*hook.HookStateDir, 0)
+		c.Check(err, gc.IsNil)
+		return nil
+	})
+	os.Args = []string{"exe", "peer-relation-changed"}
+	err := hook.Main(r)
+	c.Logf("err info: %v", errors.Info(err))
+	c.Assert(err, gc.ErrorMatches, "cannot save local state: .*")
+}
+
+func (s *HookSuite) TestMainCleansUpLocalStateOnStopHook(c *gc.C) {
+	s.StartServer(c, 0, "peer0/0")
+	r := hook.NewRegistry()
+	r1 := r.NewRegistry("sub")
+	r1.Register("peer-relation-changed", func(ctxt *hook.Context) error {
+		var x *int
+		return ctxt.LocalState("x", &x)
+	})
+	// Create some local state.
+	os.Args = []string{"exe", "peer-relation-changed"}
+	err := hook.Main(r)
+	c.Assert(err, gc.IsNil)
+
+	// Check that the state directory exists.
+	ctxt, err := hook.NewContext()
+	c.Assert(err, gc.IsNil)
+	defer ctxt.Close()
+	_, err = os.Stat(ctxt.StateDir())
+	c.Assert(err, gc.IsNil)
+
+	// Run the stop hook and check that the state directory has been removed.
+	os.Args = []string{"exe", "stop"}
+	err = hook.Main(r)
+	c.Assert(err, gc.IsNil)
+	_, err = os.Stat(ctxt.StateDir())
+	c.Assert(os.IsNotExist(err), gc.Equals, true)
+
+	// Check that the top level localstate directory still exists, but
+	// is now empty.
+	infos, err := ioutil.ReadDir(*hook.HookStateDir)
+	c.Assert(err, gc.IsNil)
+	c.Assert(infos, gc.HasLen, 0)
 }
 
 func (s *HookSuite) TestMainWithEmptyRegistry(c *gc.C) {
@@ -396,7 +455,7 @@ var latestState = make(map[string]localState)
 
 func localStateHookFunc(name string) func(*hook.Context) error {
 	return func(ctxt *hook.Context) error {
-		var state localState
+		var state *localState
 		if err := ctxt.LocalState(name, &state); err != nil {
 			return errors.Wrap(err)
 		}
@@ -405,7 +464,7 @@ func localStateHookFunc(name string) func(*hook.Context) error {
 		}
 		state.Name = name
 		state.CallCount++
-		latestState[name] = state
+		latestState[name] = *state
 		return nil
 	}
 }
@@ -469,5 +528,6 @@ func (s *HookSuite) TestMainWithUnregisteredHook(c *gc.C) {
 	r.Register("install", func(*hook.Context) error { return nil })
 	os.Args = []string{"exe", "peer-relation-changed"}
 	err := hook.Main(r)
-	c.Assert(err, gc.ErrorMatches, `usage: runhook install`)
+	c.Assert(err, gc.ErrorMatches, `usage: runhook install
+	| runhook stop`)
 }
