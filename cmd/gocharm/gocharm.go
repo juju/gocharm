@@ -26,6 +26,7 @@
 // be defined and used from runhook.
 //
 // Currently gocharm iterates through all charms inside $JUJU_REPOSITORY.
+//
 // TODO change this to allow specific charms to be specified, defaulting
 // to the charm enclosing the current directory.
 //
@@ -36,18 +37,18 @@
 //
 // TODO use godeps to freeze dependencies into the charm.
 //
-// TODO examples
+// TODO examples.
 //
 // TODO validate metadata against actual registered hooks.
-//	If there's a hook registered against a relation that's
-//	not declared, or there's a hook declared but no hooks are
-//	registered for it, return an error.
+// If there's a hook registered against a relation that's
+// not declared, or there's a hook declared but no hooks are
+// registered for it, return an error.
 //
 // TODO(maybe) allow code to register relations, and either
-//	validate against charm metadata or actually modify the
-//	charm metadata in place (would require a charm.WriteMeta
-//	function and users might not like that, as it may mess up formatting)
-//	package hook; func (r *Registry) RegisterRelation(name string, rel charm.Relation)
+// validate against charm metadata or actually modify the
+// charm metadata in place (would require a charm.WriteMeta
+// function and users might not like that, as it may mess up formatting)
+// package hook; func (r *Registry) RegisterRelation(name string, rel charm.Relation)
 //
 // TODO allow install and start hooks to be omitted if desired - generate them
 // automatically if necessary.
