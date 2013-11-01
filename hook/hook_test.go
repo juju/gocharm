@@ -96,6 +96,13 @@ func (s *HookSuite) setenv(key, val string) {
 	os.Setenv(key, val)
 }
 
+func (s *HookSuite) newContext(c *gc.C, args ...string) *hook.Context {
+	os.Args = append([]string{"runhook"}, args...)
+	ctxt, err := hook.NewContext()
+	c.Assert(err, gc.IsNil)
+	return ctxt
+}
+
 func (s *HookSuite) TestSimple(c *gc.C) {
 	s.StartServer(c, 0, "peer0/0")
 	os.Args = []string{"runhook", "peer-relation-changed"}
@@ -171,11 +178,8 @@ func (s *HookSuite) TestLocalState(c *gc.C) {
 	c.Assert(string(data), gc.Equals, `{"Foo":88,"Bar":"xxx"}`)
 }
 
-func (s *HookSuite) newContext(c *gc.C, args ...string) *hook.Context {
-	os.Args = append([]string{"runhook"}, args...)
-	ctxt, err := hook.NewContext()
-	c.Assert(err, gc.IsNil)
-	return ctxt
+func (s *HookSuite) TestContextGetter(c *gc.C) {
+	// TODO
 }
 
 func (s *HookSuite) TestGetRelation(c *gc.C) {
