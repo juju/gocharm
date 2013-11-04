@@ -1,4 +1,5 @@
 package runhook
+
 import (
 	"fmt"
 	"io/ioutil"
@@ -7,7 +8,7 @@ import (
 )
 
 type handler struct {
-	mu sync.Mutex
+	mu         sync.Mutex
 	currentVal string
 }
 

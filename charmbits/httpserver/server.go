@@ -34,17 +34,20 @@ type serverState struct {
 	InstalledPort *int
 }
 
-type server struct {
-	*serverState
+type Server struct {
+	state          *serverState
 	ctxt           *hook.Context
 	configuredPort *int
 }
 
+// ServerGetter returns a Server instance from a hook context.
+type ServerGetter func(*hook.Context) (*Server, error)
+
 // Register registers the handlers and commands necessary for
 // starting an http server in a charm that will serve content
 // using the handler created by calling newHandler.
-func Register(r *hook.Registry, newHandler func() http.Handler) {
-	register := func(hookName string, f func(*server) error) {
+func Register(r *hook.Registry, newHandler func() http.Handler) ServerGetter {
+	register := func(hookName string, f func(*Server) error) {
 		r.Register(hookName, func(ctxt *hook.Context) error {
 			srv, err := getServer(ctxt)
 			if err != nil {
@@ -54,11 +57,14 @@ func Register(r *hook.Registry, newHandler func() http.Handler) {
 		})
 	}
 
-	register("config-changed", (*server).configChanged)
-	register("stop", (*server).uninstall)
+	register("config-changed", (*Server).configChanged)
+	register("stop", (*Server).uninstall)
 	r.RegisterCommand("server", func() {
 		serverCommand(newHandler)
 	})
+	return func(ctxt *hook.Context) (*Server, error) {
+		return getServer(r.LocalContext(ctxt))
+	}
 }
 
 // getServer returns the charm's HTTP server state.
@@ -66,8 +72,8 @@ func Register(r *hook.Registry, newHandler func() http.Handler) {
 // Although it returns a new instance of the server type, its
 // serverState fields are persistently stored using the hook package's
 // local-state mechanism.
-func getServer(ctxt *hook.Context) (*server, error) {
-	srv := &server{
+func getServer(ctxt *hook.Context) (*Server, error) {
+	srv := &Server{
 		ctxt: ctxt,
 	}
 	port0, err := ctxt.GetConfig("server-port")
@@ -82,21 +88,34 @@ func getServer(ctxt *hook.Context) (*server, error) {
 			ctxt.Logf("ignoring invalid port %v", port0)
 		}
 	}
-	if err := ctxt.LocalState("server", &srv.serverState); err != nil {
+	if err := ctxt.LocalState("server", &srv.state); err != nil {
 		return nil, errors.Wrap(err)
 	}
 	return srv, nil
 }
 
-func (srv *server) upstartService() *upstart.Service {
+// PrivateAddress returns the TCP address of the HTTP server.
+// If the server is not running, it returns the empty string.
+func (srv *Server) PrivateAddress() (string, error) {
+	if !srv.state.Installed {
+		return "", nil
+	}
+	addr, err := srv.ctxt.PrivateAddress()
+	if err != nil {
+		return "", errors.Wrap(err)
+	}
+	return fmt.Sprintf("%s:%d", addr, *srv.state.InstalledPort), nil
+}
+
+func (srv *Server) upstartService() *upstart.Service {
 	return &upstart.Service{
 		Name:    "concat-webserver-" + names.UnitTag(srv.ctxt.Unit),
 		InitDir: "/etc/init",
 	}
 }
 
-func (srv *server) install() error {
-	if srv.Installed || srv.configuredPort == nil {
+func (srv *Server) install() error {
+	if srv.state.Installed || srv.configuredPort == nil {
 		return nil
 	}
 	// Ask for the new port before trying anything else.
@@ -117,23 +136,23 @@ func (srv *server) install() error {
 	if err := conf.Install(); err != nil {
 		return errors.Wrap(err)
 	}
-	srv.Installed = true
-	srv.InstalledPort = srv.configuredPort
+	srv.state.Installed = true
+	srv.state.InstalledPort = srv.configuredPort
 	return nil
 }
 
-func (srv *server) uninstall() error {
-	if !srv.Installed {
+func (srv *Server) uninstall() error {
+	if !srv.state.Installed {
 		return nil
 	}
-	if err := srv.ctxt.ClosePort("tcp", *srv.InstalledPort); err != nil {
+	if err := srv.ctxt.ClosePort("tcp", *srv.state.InstalledPort); err != nil {
 		return errors.Wrap(err)
 	}
 	if err := srv.upstartService().StopAndRemove(); err != nil {
 		return errors.Wrap(err)
 	}
-	srv.Installed = false
-	srv.InstalledPort = nil
+	srv.state.Installed = false
+	srv.state.InstalledPort = nil
 	return nil
 }
 
@@ -145,13 +164,13 @@ func atoi(s string) int {
 	return n
 }
 
-func (srv *server) configChanged() error {
+func (srv *Server) configChanged() error {
 	switch {
-	case !srv.Installed:
+	case !srv.state.Installed:
 		if err := srv.install(); err != nil {
 			return errors.Wrapf(err, "could not install server")
 		}
-	case srv.configuredPort == nil || *srv.configuredPort != *srv.InstalledPort:
+	case srv.configuredPort == nil || *srv.configuredPort != *srv.state.InstalledPort:
 		// The port has changed - reinstall server with new port configured.
 		if err := srv.uninstall(); err != nil {
 			return errors.Wrapf(err, "could not uninstall server")

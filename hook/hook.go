@@ -191,7 +191,7 @@ func (ctxt *Context) ClosePort(proto string, port int) error {
 	return errors.Wrap(err)
 }
 
-// PrivateAddress returns the public address of the local unit.
+// PublicAddress returns the public address of the local unit.
 func (ctxt *Context) PublicAddress() (string, error) {
 	out, err := ctxt.run("unit-get", "public-address")
 	if err != nil {

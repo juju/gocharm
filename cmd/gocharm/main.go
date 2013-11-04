@@ -55,7 +55,6 @@ import (
 	"io/ioutil"
 	"launchpad.net/errgo/errors"
 	"launchpad.net/juju-core/charm"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"

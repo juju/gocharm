@@ -8,19 +8,23 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"launchpad.net/errgo/errors"
-	"launchpad.net/juju-utils/hook"
+	"launchpad.net/juju-core/utils"
 	"launchpad.net/juju-utils/charmbits/httpserver"
+	"launchpad.net/juju-utils/hook"
 )
 
 func RegisterHooks(r *hook.Registry) {
-	httpserver.Register(r.NewRegistry("httpserver"), func() http.Handler {
-		return newHandler()
-	})
+	getServer := httpserver.Register(r.NewRegistry("httpserver"), newHandler)
 	register := func(hookName string, f func(*concatenator) error) {
 		r.Register(hookName, func(ctxt *hook.Context) error {
-			return f(newConcatenator(ctxt))
+			c, err := newConcatenator(ctxt, getServer)
+			if err != nil {
+				return errors.Wrap(err)
+			}
+			return f(c)
 		})
 	}
 	r.Register("install", nothing)
@@ -33,12 +37,18 @@ func RegisterHooks(r *hook.Registry) {
 
 type concatenator struct {
 	ctxt *hook.Context
+	srv  *httpserver.Server
 }
 
-func newConcatenator(ctxt *hook.Context) *concatenator {
+func newConcatenator(ctxt *hook.Context, newServer httpserver.ServerGetter) (*concatenator, error) {
+	srv, err := newServer(ctxt)
+	if err != nil {
+		return nil, errors.Wrap(err)
+	}
 	return &concatenator{
 		ctxt: ctxt,
-	}
+		srv:  srv,
+	}, nil
 }
 
 func (c *concatenator) changed() error {
@@ -78,6 +88,11 @@ func (c *concatenator) currentVal() (string, error) {
 	return fmt.Sprintf("{%s}", strings.Join(vals, " ")), nil
 }
 
+var shortAttempt = utils.AttemptStrategy{
+	Total: 50 * time.Millisecond,
+	Delay: 5 * time.Millisecond,
+}
+
 func (c *concatenator) setCurrentVal(val string) error {
 	ids, err := c.ctxt.RelationIds("downstream")
 	if err != nil {
@@ -89,40 +104,42 @@ func (c *concatenator) setCurrentVal(val string) error {
 			return errors.Wrapf(err, "cannot set relation %v", id)
 		}
 	}
-	return nil
+	// The web server may be notionally started not be actually
+	// running yet, so try for a short while if it fails.
+	for a := shortAttempt.Start(); a.Next(); {
+		err := c.notifyHTTPServer(val)
+		if err == nil {
+			return nil
+		}
+		if !a.HasNext() {
+			return errors.Wrap(err)
+		}
+	}
+	panic("unreachable")
 }
 
 func (c *concatenator) notifyHTTPServer(currentVal string) error {
-	// TODO how to implement this?
-	// The problem is that we can't access the charmbits/httpserver
-	// state at all - we currently assume a one-to-one correspondence
-	// between hook context and hook, so there's no way
-	// to create an httpserver.server from a context created for
-	// a concatenator hook.
-	//
-	// Perhaps something like this?
-	// // ContextGetter returns a function that transforms an existing
-	// // context into a context with state local to r.
-	// // If the context is already local to r, it returns its argument.
-	// // When the returned context is closed, any local state
-	// // is saved.
-	// func (r *Registry) ContextGetter() func(*Context) *Context {
-	// }
-	//
-	// BUT! perhaps this might be better if we allow getting local
-	// state more than once, for instance by mandating that we
-	// pass a pointer-to-pointer into LocalState, so it
-	// can update it to point to an existing local state value
-	// if need be (no need to panic if called twice).
-	//
-	// Then we don't need to bother saving state after each hook
-	// execution or when a context created as above is closed.
-	//
-	// When we have the above, we can return a newServer function
-	// from httpserver.Register:
-	//	func(ctxt *hook.Context) *httpserver.Server
-	// and provide:
-	//	func (srv *httpServer.Server) LocalURL() (string, error)
+	c.ctxt.Logf("notifyHTTPServer of %q", currentVal)
+	addr, err := c.srv.PrivateAddress()
+	if err != nil {
+		return errors.Wrap(err)
+	}
+	if addr == "" {
+		c.ctxt.Logf("cannot notify local http server because it's not running")
+		return nil
+	}
+	req, err := http.NewRequest("PUT", fmt.Sprintf("http://%s/val", addr), strings.NewReader(currentVal))
+	if err != nil {
+		return errors.Wrap(err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return errors.Wrap(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return errors.Newf("http request failed: %v", resp.Status)
+	}
 	return nil
 }
 
