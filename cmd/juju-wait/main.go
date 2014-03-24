@@ -3,17 +3,11 @@ package main
 import (
 	"flag"
 	"fmt"
-	stdlog "log"
 	"os"
 	"regexp"
 
-	"launchpad.net/juju-core/environs"
-	_ "launchpad.net/juju-core/environs/ec2"
-	_ "launchpad.net/juju-core/environs/maas"
-	_ "launchpad.net/juju-core/environs/openstack"
+	_ "launchpad.net/juju-core/provider/all"
 	"launchpad.net/juju-core/juju"
-	"launchpad.net/juju-core/log"
-	"launchpad.net/juju-core/state/api"
 	"launchpad.net/juju-core/state/api/params"
 )
 
@@ -58,12 +52,12 @@ func main() {
 		fatalf("invalid status regular expression: %v", err)
 	}
 	if *debug {
-		log.SetTarget(stdlog.New(os.Stderr, "", stdlog.LstdFlags))
+//		log.SetTarget(stdlog.New(os.Stderr, "", stdlog.LstdFlags))
 	}
 	if err := juju.InitJujuHome(); err != nil {
 		fatalf("cannot initialise juju home: %v", err)
 	}
-	client, err := openAPIClient(*envName)
+	client, err := juju.NewAPIClientFromName("")
 	if err != nil {
 		fatalf("cannot open API: %v", err)
 	}
@@ -129,25 +123,6 @@ func status(unit *params.UnitInfo) string {
 		s += ": " + unit.StatusInfo
 	}
 	return s
-}
-
-func openAPIClient(envName string) (*api.Client, error) {
-	env, err := environs.NewFromName("")
-	if err != nil {
-		return nil, fmt.Errorf("cannot open environ: %v", err)
-	}
-	_, info, err := env.StateInfo()
-	if err != nil {
-		return nil, fmt.Errorf("cannot get api info: %v", err)
-	}
-	info.Tag = "user-admin"
-	info.Password = env.Config().AdminSecret()
-	st, err := api.Open(info)
-	if err != nil {
-		return nil, fmt.Errorf("cannot open api: %v", err)
-	}
-
-	return st.Client(), nil
 }
 
 func fatalf(f string, args ...interface{}) {
