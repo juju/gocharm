@@ -9,6 +9,7 @@ import (
 	"io/ioutil"
 	"launchpad.net/errgo/errors"
 	"launchpad.net/juju-core/names"
+	"launchpad.net/juju-core/utils/exec"
 	"launchpad.net/juju-core/worker/uniter/jujuc"
 	"net/rpc"
 	"os"
@@ -347,7 +348,7 @@ func (ctxt *Context) run(cmd string, args ...string) (stdout []byte, err error) 
 		Args:        args,
 	}
 	// log.Printf("run req %#v", req)
-	var resp jujuc.Response
+	var resp exec.ExecResponse
 	err = ctxt.jujucClient.Call("Jujuc.Main", req, &resp)
 	if err != nil {
 		return nil, errors.Newf("cannot call jujuc.Main: %v", err)

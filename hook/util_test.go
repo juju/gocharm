@@ -71,6 +71,10 @@ type ServerContext struct {
 	rels   map[int]*ServerContextRelation
 }
 
+func (c *ServerContext) OwnerTag() string {
+	return "unknown"
+}
+
 func (c *ServerContext) UnitName() string {
 	return "u/0"
 }
