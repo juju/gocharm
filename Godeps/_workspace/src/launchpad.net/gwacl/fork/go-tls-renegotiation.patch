@@ -1,0 +1,113 @@
+diff -r c242bbf5fa8c src/pkg/crypto/tls/common.go
+--- a/src/pkg/crypto/tls/common.go	Wed Jul 17 14:03:27 2013 -0400
++++ b/src/pkg/crypto/tls/common.go	Thu Jul 18 13:45:43 2013 -0400
+@@ -44,6 +44,7 @@
+ 
+ // TLS handshake message types.
+ const (
++	typeHelloRequest       uint8 = 0
+ 	typeClientHello        uint8 = 1
+ 	typeServerHello        uint8 = 2
+ 	typeNewSessionTicket   uint8 = 4
+diff -r c242bbf5fa8c src/pkg/crypto/tls/conn.go
+--- a/src/pkg/crypto/tls/conn.go	Wed Jul 17 14:03:27 2013 -0400
++++ b/src/pkg/crypto/tls/conn.go	Thu Jul 18 13:45:43 2013 -0400
+@@ -146,6 +146,9 @@
+ 	hc.mac = hc.nextMac
+ 	hc.nextCipher = nil
+ 	hc.nextMac = nil
++	for i := range hc.seq {
++		hc.seq[i] = 0
++	}
+ 	return nil
+ }
+ 
+@@ -478,7 +481,7 @@
+ func (c *Conn) readRecord(want recordType) error {
+ 	// Caller must be in sync with connection:
+ 	// handshake data if handshake not yet completed,
+-	// else application data.  (We don't support renegotiation.)
++	// else application data.
+ 	switch want {
+ 	default:
+ 		return c.sendAlert(alertInternalError)
+@@ -611,7 +614,7 @@
+ 
+ 	case recordTypeHandshake:
+ 		// TODO(rsc): Should at least pick off connection close.
+-		if typ != want {
++		if typ != want && !c.isClient {
+ 			return c.sendAlert(alertNoRenegotiation)
+ 		}
+ 		c.hand.Write(data)
+@@ -741,6 +744,8 @@
+ 	data = c.hand.Next(4 + n)
+ 	var m handshakeMessage
+ 	switch data[0] {
++	case typeHelloRequest:
++		m = new(helloRequestMsg)
+ 	case typeClientHello:
+ 		m = new(clientHelloMsg)
+ 	case typeServerHello:
+@@ -825,6 +830,25 @@
+ 	return n + m, c.setError(err)
+ }
+ 
++func (c *Conn) handleRenegotiation() error {
++	c.handshakeComplete = false
++	if !c.isClient {
++		panic("renegotiation should only happen for a client")
++	}
++
++	msg, err := c.readHandshake()
++	if err != nil {
++		return err
++	}
++	_, ok := msg.(*helloRequestMsg)
++	if !ok {
++		c.sendAlert(alertUnexpectedMessage)
++		return alertUnexpectedMessage
++	}
++
++	return c.Handshake()
++}
++
+ // Read can be made to time out and return a net.Error with Timeout() == true
+ // after a fixed time limit; see SetDeadline and SetReadDeadline.
+ func (c *Conn) Read(b []byte) (n int, err error) {
+@@ -844,6 +868,14 @@
+ 				// Soft error, like EAGAIN
+ 				return 0, err
+ 			}
++			if c.hand.Len() > 0 {
++				// We received handshake bytes, indicating the start of
++				// a renegotiation.
++				if err := c.handleRenegotiation(); err != nil {
++					return 0, err
++				}
++				continue
++			}
+ 		}
+ 		if err := c.error(); err != nil {
+ 			return 0, err
+diff -r c242bbf5fa8c src/pkg/crypto/tls/handshake_messages.go
+--- a/src/pkg/crypto/tls/handshake_messages.go	Wed Jul 17 14:03:27 2013 -0400
++++ b/src/pkg/crypto/tls/handshake_messages.go	Thu Jul 18 13:45:43 2013 -0400
+@@ -1243,6 +1243,17 @@
+ 	return true
+ }
+ 
++type helloRequestMsg struct {
++}
++
++func (*helloRequestMsg) marshal() []byte {
++	return []byte{typeHelloRequest, 0, 0, 0}
++}
++
++func (*helloRequestMsg) unmarshal(data []byte) bool {
++	return len(data) == 4
++}
++
+ func eqUint16s(x, y []uint16) bool {
+ 	if len(x) != len(y) {
+ 		return false

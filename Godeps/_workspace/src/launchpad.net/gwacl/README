@@ -1,0 +1,54 @@
+===========================================
+GWACL - The Go Windows Azure Client Library
+===========================================
+
+
+How to generate an x509 key to talk to Azure
+--------------------------------------------
+
+Azure requires that API clients use an x509 certificate to authenticate to the
+management API. Create the certificate with::
+
+  openssl req -config /usr/share/ssl-cert/ssleay.cnf -x509 -nodes \
+    -days 3650 -newkey rsa:2048 -keyout azure.pem -out azure.pem
+
+Note the use of ``ssleay.cnf``.  It just contains some crappy defaults so you
+don't get prompted for certificate data.  You can leave it out if you want,
+but then you'll need to enter country, organisation, etc.
+
+Azure wants you to upload a ``.cer`` file (which is in DER format).  Here's
+how you can extract a ``.cer`` file from the ``.pem``::
+
+   openssl x509 -inform pem -in azure.pem -outform der -out azure.cer
+
+You can now upload ``azure.cer`` to Azure as a management certificate.
+
+
+Using the key in GWACL
+----------------------
+
+GWACL requires the key in the .pem file, so make sure you keep that file
+around.  The .cer file can be deleted as you won't need it again, and it's easy
+to regenerate if you want to re-upload it.
+
+
+Example programs
+----------------
+
+Storage
+^^^^^^^
+
+The storage example is a stand-alone tool which allows the user to manipulate
+a storage account::
+
+    go run example/storage/run.go --help
+
+Management
+^^^^^^^^^^
+
+The management example is a piece of code that starts up a new role instance,
+optionally pauses so you can play with it, and then shuts everything down
+again.  It is intended to be useful for testing the library itself, but also 
+serves as an example of how to use the GWACL API::
+
+    go run example/management/run.go -cert <your pem file> -subscriptionid <your Azure subscription ID> [-wait]

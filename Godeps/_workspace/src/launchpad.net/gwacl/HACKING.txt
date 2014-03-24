@@ -1,0 +1,143 @@
+==================================================
+Hacking in GWACL (Go Windows Azure Client Library)
+==================================================
+
+(this doc is a huge WIP)
+
+Submitting changes
+------------------
+
+`GWACL`_ is hosted on Launchpad using `Bazaar`_.  Submitting a change
+requires you to create a merge proposal against the trunk branch and a
+core committer will then review the branch.  Once the branch is accepted,
+it will be landed by the reviewer.
+
+All branch submissions must be formatted using ``make format``.  They must
+also have a successful test run with ``make check``.  New features must
+always be accompanied by new tests.
+
+.. _GWACL: https://launchpad.net/gwacl
+.. _Bazaar: http://bazaar.canonical.com/
+
+
+Overview of Azure
+-----------------
+
+Computing services
+^^^^^^^^^^^^^^^^^^
+
+Azure was originally designed as SaaS for Microsoft Windows and later amended
+to allow individual virtual machines to run up with Linux distributions.
+Some remnants of this SaaS architecture remain today, and understanding them
+is crucial to understanding how GWACL works when spinning up virtual
+instances.
+
+There are three main components to any virtual instance:
+
+ * A hosted service
+ * A deployment
+ * A role instance
+
+Hosted services are the "top level" of a virtual resource.  Each one
+contains up to two deployments, and has its own DNS entry and firewall
+settings (known as "endpoints" in Azure).  The name of the service forms the
+DNS entry as "<name>.cloudapp.net".
+
+Deployments are Azure's abstraction of whether something is running on its
+staging or production environment.  They are only exposed in the API and not
+the web management UI.  Deployments contain one or more role instances.
+
+Role instances are virtual machines.  Many instances may exist in a deployment
+(and hence hosted service) but if there is more than one they are intended to
+be running components from the same application and they will all share the
+same DNS entry and open endpoints.  Thus, a hosted service exposes a single
+application on the internet and may be composed of multiple role instances
+for load balancing and differing components.
+
+For this reason, if you want several separate applications, you must create a
+separate service, deployment and role instance for each.
+
+Networking across hosted services
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Each service can only see as much of each other service as any public observer
+does, however it's possible to place them in a private network so they are
+effectively on a share LAN segment with no firewall.
+
+In Azure this is called a "virtual network".  The virtual network must be
+defined before any services that use it are created, and then associated at
+service creation time.  The virtual network can be assigned any valid
+networking range which is then private to all the virtual instances defined to
+use it.
+
+Storage services
+^^^^^^^^^^^^^^^^
+
+Azure supports data storage which is accessed separately to role instances
+and hosted services.  This is organised into several components:
+
+ * A storage account
+ * Containers within an account
+ * Blobs inside containers
+
+A storage account can be created via the web management UI or API.  Its name
+forms the DNS entry for that storage as "<name>.blob.core.windows.net".
+
+A container forms the next, and only, level of indirection under the account.
+You cannot have a container under a container.  Containers control the
+default privacy of files therein.
+
+Blobs are the actual files in the storage.  They can be of two main types:
+
+ * Block blobs
+ * Page blobs
+
+Block blobs are used for sequential access and are optimised for streaming.
+Page blobs are used for random access and allow access to ranges of bytes in a
+blob.
+
+The full URL to a file in a storage account looks like:
+
+    https://<accountname>.blob.core.windows.net/<containername>/<blobname>
+
+The http version of the same URL would work too, but is prone to spurious
+authentication failures when accessed through a proxy.  Therefore gwacl accesses
+the storage API through https; this may become configurable later if there is
+demand.
+
+
+RESTful API access
+------------------
+
+There are two API endpoints for Azure, the management API and the storage API.
+Each also uses its own authentication method:
+
+ * x509 certificates for the management API
+ * HMAC signed request for the storage API
+
+The GWACL code hides most of this complexity from you, it just requires the
+cerificate data for the management API access, and the storage key for storage
+API access.
+
+The storage key can be fetched either from the management UI, or management
+API call.
+
+Generating x509 certificates is explained in the :doc:`README <README>`
+
+
+GWACL's API philosophy
+----------------------
+
+API functions in the library should take a single struct parameter, which
+itself contains one or more parameters.  Existing functions that do not follow
+this rule are historic and should not be copied.
+
+This brings several advantages::
+
+    1. Keyword parameters improve callsite readability.
+    2. It allows for parameters to be defaulted if not supplied.
+    3. It's much easier to change the API later without breaking existing
+       code, it just needs re-compiling in the case where you add new,
+       optional, parameters.
+
+
