@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"launchpad.net/errgo/errors"
-	"launchpad.net/juju-core/utils"
-	"launchpad.net/juju-utils/charmbits/httpserver"
-	"launchpad.net/juju-utils/hook"
+	"github.com/juju/utils"
+	"gopkg.in/juju-utils.v0/charmbits/httpserver"
+	"gopkg.in/juju-utils.v0/hook"
 )
 
 func RegisterHooks(r *hook.Registry) {

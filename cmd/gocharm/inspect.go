@@ -6,7 +6,7 @@ import (
 	"io"
 	"io/ioutil"
 	"launchpad.net/errgo/errors"
-	"launchpad.net/juju-core/charm"
+	"github.com/juju/charm"
 	"log"
 	"os"
 	"os/exec"
@@ -147,7 +147,7 @@ const inspectCode = `
 package main
 import (
 	"fmt"
-	"launchpad.net/juju-utils/hook"
+	"gopkg.in/juju-utils.v0/hook"
 	runhook "runhook"
 )
 

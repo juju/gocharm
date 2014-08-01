@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
-	"launchpad.net/juju-core/charm"
+	"github.com/juju/charm"
 	"os"
 	"path/filepath"
 	"text/template"
@@ -22,7 +22,7 @@ If the -r flag is specified, the directories
 are recursively searched for charms.
 
 Documentation for the Meta type is here:
-http://godoc.org/launchpad.net/juju-core/charm#Meta
+http://godoc.org/github.com/juju/charm#Meta
 
 Documentation for the Go template package is here:
 http://golang.org/pkg/text/template

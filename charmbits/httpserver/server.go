@@ -10,9 +10,10 @@ import (
 	"flag"
 	"fmt"
 	"launchpad.net/errgo/errors"
-	"launchpad.net/juju-core/names"
-	"launchpad.net/juju-core/upstart"
-	"launchpad.net/juju-utils/hook"
+	"github.com/juju/names"
+	"github.com/juju/juju/service/upstart"
+	serviceCommon "github.com/juju/juju/service/common"
+	"gopkg.in/juju-utils.v0/hook"
 	"log"
 	"net/http"
 	"path/filepath"
@@ -108,9 +109,19 @@ func (srv *Server) PrivateAddress() (string, error) {
 }
 
 func (srv *Server) upstartService() *upstart.Service {
+	exe := filepath.Join(srv.ctxt.CharmDir, "bin", "runhook")
 	return &upstart.Service{
-		Name:    "concat-webserver-" + names.UnitTag(srv.ctxt.Unit),
-		InitDir: "/etc/init",
+		Name:    "concat-webserver-" + names.NewUnitTag(srv.ctxt.Unit).String(),
+		Conf: serviceCommon.Conf{
+			InitDir: "/etc/init",
+			Desc:    "web server for concat charm",
+			Cmd: fmt.Sprintf("%s %s -http ':%d'",
+				exe,
+				srv.ctxt.CommandName("server"),
+				*srv.configuredPort,
+			),
+			// TODO save output somewhere - we need a better answer for that.
+		},
 	}
 }
 
@@ -122,18 +133,7 @@ func (srv *Server) install() error {
 	if err := srv.ctxt.OpenPort("tcp", *srv.configuredPort); err != nil {
 		return errors.Wrap(err)
 	}
-	exe := filepath.Join(srv.ctxt.CharmDir, "bin", "runhook")
-	conf := &upstart.Conf{
-		Service: *srv.upstartService(),
-		Desc:    "web server for concat charm",
-		Cmd: fmt.Sprintf("%s %s -http ':%d'",
-			exe,
-			srv.ctxt.CommandName("server"),
-			*srv.configuredPort,
-		),
-		// TODO save output somewhere - we need a better answer for that.
-	}
-	if err := conf.Install(); err != nil {
+	if err := srv.upstartService().Install(); err != nil {
 		return errors.Wrap(err)
 	}
 	srv.state.Installed = true

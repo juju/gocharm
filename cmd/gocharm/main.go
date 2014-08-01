@@ -11,7 +11,7 @@
 //
 // The runhook package must implement a RegisterHooks function which
 // must register any hooks required by calling hook.RegisterHook (see
-// launchpad.net/juju-utils/hook).
+// gopkg.in/juju-utils.v0/hook).
 //
 // Gocharm runs runhook.RegisterHooks locally to find out what hooks are
 // registered, and automatically writes stubs in the hooks directory.
@@ -54,7 +54,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"launchpad.net/errgo/errors"
-	"launchpad.net/juju-core/charm"
+	"github.com/juju/charm"
 	"os"
 	"path/filepath"
 	"strings"

@@ -3,7 +3,7 @@ package main
 import (
 	"errors"
 	. "launchpad.net/gocheck"
-	"launchpad.net/juju-core/state/api/params"
+	"github.com/juju/juju/state/api/params"
 	"regexp"
 	stdtesting "testing"
 )

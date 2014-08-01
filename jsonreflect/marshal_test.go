@@ -4,7 +4,7 @@ import (
 	"reflect"
 
 	gc "launchpad.net/gocheck"
-	"launchpad.net/juju-utils/jsonreflect"
+	"gopkg.in/juju-utils.v0/jsonreflect"
 )
 
 type marshalSuite struct{}

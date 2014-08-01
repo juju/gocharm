@@ -6,9 +6,9 @@ import (
 	"os"
 	"regexp"
 
-	_ "launchpad.net/juju-core/provider/all"
-	"launchpad.net/juju-core/juju"
-	"launchpad.net/juju-core/state/api/params"
+	_ "github.com/juju/juju/provider/all"
+	"github.com/juju/juju/juju"
+	"github.com/juju/juju/state/api/params"
 )
 
 var help = `
@@ -52,7 +52,7 @@ func main() {
 		fatalf("invalid status regular expression: %v", err)
 	}
 	if *debug {
-//		log.SetTarget(stdlog.New(os.Stderr, "", stdlog.LstdFlags))
+		//		log.SetTarget(stdlog.New(os.Stderr, "", stdlog.LstdFlags))
 	}
 	if err := juju.InitJujuHome(); err != nil {
 		fatalf("cannot initialise juju home: %v", err)

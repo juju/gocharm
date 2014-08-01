@@ -5,7 +5,7 @@ import (
 	"github.com/kr/fs"
 	"io/ioutil"
 	"launchpad.net/errgo/errors"
-	"launchpad.net/juju-core/charm"
+	"github.com/juju/charm"
 	"log"
 	"os"
 	"os/exec"
@@ -21,7 +21,7 @@ package main
 import (
 	"fmt"
 	runhook "runhook"
-	"launchpad.net/juju-utils/hook"
+	"gopkg.in/juju-utils.v0/hook"
 	"os"
 )
 

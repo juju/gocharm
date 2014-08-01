@@ -5,9 +5,9 @@ import (
 	"io/ioutil"
 	"launchpad.net/errgo/errors"
 	gc "launchpad.net/gocheck"
-	"launchpad.net/juju-core/cmd"
-	"launchpad.net/juju-core/worker/uniter/jujuc"
-	"launchpad.net/juju-utils/hook"
+	"github.com/juju/cmd"
+	"github.com/juju/juju/worker/uniter/jujuc"
+	"gopkg.in/juju-utils.v0/hook"
 	"os"
 	"path/filepath"
 )

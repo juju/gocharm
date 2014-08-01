@@ -8,9 +8,9 @@ import (
 	"fmt"
 	"io/ioutil"
 	"launchpad.net/errgo/errors"
-	"launchpad.net/juju-core/names"
-	"launchpad.net/juju-core/utils/exec"
-	"launchpad.net/juju-core/worker/uniter/jujuc"
+	"github.com/juju/names"
+	"github.com/juju/utils/exec"
+	"github.com/juju/juju/worker/uniter/jujuc"
 	"net/rpc"
 	"os"
 	"path/filepath"
@@ -179,7 +179,7 @@ func (ctxt *Context) IsRelationHook() bool {
 // UnitTag returns the tag of the current unit, useful for
 // using as a file name.
 func (ctxt *Context) UnitTag() string {
-	return names.UnitTag(ctxt.Unit)
+	return names.NewUnitTag(ctxt.Unit).String()
 }
 
 func (ctxt *Context) OpenPort(proto string, port int) error {

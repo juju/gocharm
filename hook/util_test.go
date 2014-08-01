@@ -1,18 +1,18 @@
 package hook_test
 
 // This rest of this file is an near-exact copy of
-// launchpad.net/juju-core/worker/uniter/jujuc/util_test.go
+// github.com/juju/juju/worker/uniter/jujuc/util_test.go
 
 import (
 	"bytes"
 	"fmt"
 	"io"
 	. "launchpad.net/gocheck"
-	"launchpad.net/juju-core/charm"
-	"launchpad.net/juju-core/state"
-	"launchpad.net/juju-core/state/api/params"
-	"launchpad.net/juju-core/utils/set"
-	"launchpad.net/juju-core/worker/uniter/jujuc"
+	"github.com/juju/charm"
+	"github.com/juju/juju/state"
+	"github.com/juju/juju/state/api/params"
+	"github.com/juju/utils/set"
+	"github.com/juju/juju/worker/uniter/jujuc"
 	"sort"
 	"testing"
 )
@@ -69,6 +69,12 @@ type ServerContext struct {
 	relid  int
 	remote string
 	rels   map[int]*ServerContextRelation
+}
+
+func (s *ServerContext) ActionParams() map[string]interface{} {
+	return map[string]interface{} {
+		"actionParam": "something",
+	}
 }
 
 func (c *ServerContext) OwnerTag() string {

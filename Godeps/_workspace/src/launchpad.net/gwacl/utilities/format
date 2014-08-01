@@ -1,9 +1,0 @@
-#! /bin/sh
-#
-# Reformat Go source code in the current directory, specifying gwacl's custom
-# layout preferences.
-# Any additional parameters you pass will be passed on to gofmt, before the
-# input files.  So "-h" will give you command-line help, and "-s" will activate
-# gofmt's "simplify" option.
-
-exec gofmt -w -tabs=false -tabwidth=4 "$@" .
