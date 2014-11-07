@@ -13,8 +13,8 @@ import (
 	"github.com/juju/utils"
 	"launchpad.net/errgo/errors"
 
-	"gopkg.in/juju-utils.v0/charmbits/httpserver"
-	"gopkg.in/juju-utils.v0/hook"
+	"github.com/juju/gocharm/charmbits/httpserver"
+	"github.com/juju/gocharm/hook"
 )
 
 func RegisterHooks(r *hook.Registry) {

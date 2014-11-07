@@ -11,7 +11,7 @@ import (
 	"launchpad.net/errgo/errors"
 	gc "launchpad.net/gocheck"
 
-	"gopkg.in/juju-utils.v0/hook"
+	"github.com/juju/gocharm/hook"
 )
 
 type HookSuite struct {

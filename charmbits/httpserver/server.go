@@ -19,7 +19,7 @@ import (
 	"github.com/juju/names"
 	"launchpad.net/errgo/errors"
 
-	"gopkg.in/juju-utils.v0/hook"
+	"github.com/juju/gocharm/hook"
 )
 
 // serverCommand implements the http server for the charm. It's invoked

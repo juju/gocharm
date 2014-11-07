@@ -148,7 +148,7 @@ const inspectCode = `
 package main
 import (
 	"fmt"
-	"gopkg.in/juju-utils.v0/hook"
+	"` + hookPackage + `"
 	runhook "runhook"
 )
 

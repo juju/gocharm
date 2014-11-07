@@ -1,2 +1,2 @@
-Utilities designed to work with juju-core.
+Gocharm - write your Juju charms in Go.
 ----------------------

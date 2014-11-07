@@ -1,6 +1,6 @@
 // The hook package provides a Go interface to the
 // Juju charm hook commands. It is designed to be used
-// alongside the gocharm command (launchpad.net/juju-utils/cmd/gocharm)
+// alongside the gocharm command (github.com/juju/gocharm/cmd/gocharm)
 package hook
 
 import (

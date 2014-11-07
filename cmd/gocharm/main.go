@@ -11,7 +11,7 @@
 //
 // The runhook package must implement a RegisterHooks function which
 // must register any hooks required by calling hook.RegisterHook (see
-// gopkg.in/juju-utils.v0/hook).
+// github.com/juju/gocharm/hook).
 //
 // Gocharm runs runhook.RegisterHooks locally to find out what hooks are
 // registered, and automatically writes stubs in the hooks directory.
