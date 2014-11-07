@@ -1,8 +1,0 @@
-options:
-  val:
-    description: A string value
-    type: string
-  server-port:
-    description: Port for the HTTP server to listen on.
-    type: int
-    default: 8080

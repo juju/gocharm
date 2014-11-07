@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/juju/utils"
+	"gopkg.in/juju/charm.v4"
 	"launchpad.net/errgo/errors"
 
 	"github.com/juju/gocharm/charmbits/httpserver"
@@ -18,6 +19,20 @@ import (
 )
 
 func RegisterHooks(r *hook.Registry) {
+	r.RegisterRelation(charm.Relation{
+		Name:      "downstream",
+		Interface: "stringval",
+		Role:      charm.RoleProvider,
+	})
+	r.RegisterRelation(charm.Relation{
+		Name:      "upstream",
+		Interface: "stringval",
+		Role:      charm.RoleRequirer,
+	})
+	r.RegisterConfig("val", charm.Option{
+		Description: "A string value",
+		Type:        "string",
+	})
 	getServer := httpserver.Register(r.NewRegistry("httpserver"), newHandler)
 	register := func(hookName string, f func(*concatenator) error) {
 		r.Register(hookName, func(ctxt *hook.Context) error {

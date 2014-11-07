@@ -28,10 +28,3 @@ description: |
         {concatjoin {concat2 {top}} {concat1 {top}}}
 
     Feedback loops can be arranged for further amusement.
-
-provides:
-    downstream:
-       interface: stringval
-requires:
-    upstream:
-        interface: stringval
