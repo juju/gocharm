@@ -4,13 +4,14 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"github.com/juju/charm"
-	"github.com/juju/utils/parallel"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/juju/utils/parallel"
+	"gopkg.in/juju/charm.v4"
 )
 
 var (
@@ -71,7 +72,7 @@ func download(urlDone chan<- *charm.URL, all []string) {
 				log.Printf("get %q failed: %v", curl, err)
 				return err
 			}
-			bun := ch.(*charm.Bundle)
+			bun := ch.(*charm.CharmArchive)
 			err = bun.ExpandTo(dir)
 			if err != nil {
 				log.Printf("expand %q to %q failed: %v", curl, dir, err)

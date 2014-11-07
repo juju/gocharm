@@ -2,10 +2,11 @@ package main
 
 import (
 	"errors"
-	. "launchpad.net/gocheck"
-	"github.com/juju/juju/state/api/params"
 	"regexp"
 	stdtesting "testing"
+
+	"github.com/juju/juju/apiserver/params"
+	. "launchpad.net/gocheck"
 )
 
 type suite struct{}

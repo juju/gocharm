@@ -4,10 +4,11 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
-	"github.com/juju/charm"
 	"os"
 	"path/filepath"
 	"text/template"
+
+	"gopkg.in/juju/charm.v4"
 )
 
 var usage = `
@@ -22,7 +23,7 @@ If the -r flag is specified, the directories
 are recursively searched for charms.
 
 Documentation for the Meta type is here:
-http://godoc.org/github.com/juju/charm#Meta
+http://godoc.org/gopkg.in/juju/charm.v4#Meta
 
 Documentation for the Go template package is here:
 http://golang.org/pkg/text/template
@@ -56,7 +57,7 @@ func main() {
 	dirCh := make(chan string)
 	go findCharms(dirCh, args)
 	for path := range dirCh {
-		dir, err := charm.ReadDir(path)
+		dir, err := charm.ReadCharmDir(path)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "charmmeta: cannot read %q: %v\n", path, err)
 			continue

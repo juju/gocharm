@@ -7,15 +7,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"launchpad.net/errgo/errors"
-	"github.com/juju/names"
-	"github.com/juju/utils/exec"
-	"github.com/juju/juju/worker/uniter/jujuc"
 	"net/rpc"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+
+	"github.com/juju/juju/worker/uniter/context/jujuc"
+	"github.com/juju/names"
+	"github.com/juju/utils/exec"
+	"launchpad.net/errgo/errors"
 )
 
 // TODO make it easy to derive one context from another one (changing

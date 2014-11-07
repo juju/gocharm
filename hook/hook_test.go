@@ -3,13 +3,15 @@ package hook_test
 import (
 	"fmt"
 	"io/ioutil"
-	"launchpad.net/errgo/errors"
-	gc "launchpad.net/gocheck"
-	"github.com/juju/cmd"
-	"github.com/juju/juju/worker/uniter/jujuc"
-	"gopkg.in/juju-utils.v0/hook"
 	"os"
 	"path/filepath"
+
+	"github.com/juju/cmd"
+	"github.com/juju/juju/worker/uniter/context/jujuc"
+	"launchpad.net/errgo/errors"
+	gc "launchpad.net/gocheck"
+
+	"gopkg.in/juju-utils.v0/hook"
 )
 
 type HookSuite struct {

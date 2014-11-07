@@ -5,19 +5,20 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"launchpad.net/errgo/errors"
-	"github.com/juju/charm"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"gopkg.in/juju/charm.v4"
+	"launchpad.net/errgo/errors"
 )
 
 // writeHooks ensures that the charm has the given set of hooks.
 // TODO write install and start hooks even if they're not registered,
 // because otherwise it won't be treated as a valid charm.
-func writeHooks(dir *charm.Dir, hooks map[string]bool) error {
+func writeHooks(dir *charm.CharmDir, hooks map[string]bool) error {
 	if *verbose {
 		log.Printf("writing hooks in %s", dir.Path)
 	}
@@ -108,8 +109,8 @@ func fileHasContents(path string, contents []byte) (bool, error) {
 	return true, nil
 }
 
-func registeredHooks(dir *charm.Dir) (map[string]bool, error) {
-	err := compile(dir, "inspect", inspectCode, true)
+func registeredHooks(dir *charm.CharmDir) (map[string]bool, error) {
+	err := compile(dir, "inspect", inspectCode, false)
 	if err != nil {
 		return nil, errors.Wrapf(err, "cannot build hook inspection code")
 	}

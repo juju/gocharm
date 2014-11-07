@@ -9,15 +9,17 @@ package httpserver
 import (
 	"flag"
 	"fmt"
-	"launchpad.net/errgo/errors"
-	"github.com/juju/names"
-	"github.com/juju/juju/service/upstart"
-	serviceCommon "github.com/juju/juju/service/common"
-	"gopkg.in/juju-utils.v0/hook"
 	"log"
 	"net/http"
 	"path/filepath"
 	"strconv"
+
+	serviceCommon "github.com/juju/juju/service/common"
+	"github.com/juju/juju/service/upstart"
+	"github.com/juju/names"
+	"launchpad.net/errgo/errors"
+
+	"gopkg.in/juju-utils.v0/hook"
 )
 
 // serverCommand implements the http server for the charm. It's invoked
@@ -29,7 +31,7 @@ func serverCommand(newHandler func() http.Handler) {
 }
 
 // serverState holds the persistent charm state for the server part of
-// the charm
+// the charm.
 type serverState struct {
 	Installed     bool
 	InstalledPort *int
@@ -111,7 +113,7 @@ func (srv *Server) PrivateAddress() (string, error) {
 func (srv *Server) upstartService() *upstart.Service {
 	exe := filepath.Join(srv.ctxt.CharmDir, "bin", "runhook")
 	return &upstart.Service{
-		Name:    "concat-webserver-" + names.NewUnitTag(srv.ctxt.Unit).String(),
+		Name: "concat-webserver-" + names.NewUnitTag(srv.ctxt.Unit).String(),
 		Conf: serviceCommon.Conf{
 			InitDir: "/etc/init",
 			Desc:    "web server for concat charm",

@@ -7,14 +7,15 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	. "launchpad.net/gocheck"
-	"github.com/juju/charm"
-	"github.com/juju/juju/state"
-	"github.com/juju/juju/state/api/params"
-	"github.com/juju/utils/set"
-	"github.com/juju/juju/worker/uniter/jujuc"
 	"sort"
 	"testing"
+	"time"
+
+	"github.com/juju/juju/apiserver/params"
+	"github.com/juju/juju/worker/uniter/context/jujuc"
+	"github.com/juju/utils/set"
+	"gopkg.in/juju/charm.v4"
+	. "launchpad.net/gocheck"
 )
 
 func TestPackage(t *testing.T) { TestingT(t) }
@@ -53,28 +54,19 @@ func GetHookServerContext(c *C, relid int, remote string) *ServerContext {
 	}
 }
 
-func setSettings(c *C, ru *state.RelationUnit, settings map[string]interface{}) {
-	node, err := ru.Settings()
-	c.Assert(err, IsNil)
-	for _, k := range node.Keys() {
-		node.Delete(k)
-	}
-	node.Update(settings)
-	_, err = node.Write()
-	c.Assert(err, IsNil)
-}
-
 type ServerContext struct {
+	jujuc.Context
+
 	ports  set.Strings
 	relid  int
 	remote string
 	rels   map[int]*ServerContextRelation
 }
 
-func (s *ServerContext) ActionParams() map[string]interface{} {
-	return map[string]interface{} {
+func (s *ServerContext) ActionParams() (map[string]interface{}, error) {
+	return map[string]interface{}{
 		"actionParam": "something",
-	}
+	}, nil
 }
 
 func (c *ServerContext) OwnerTag() string {
@@ -100,6 +92,14 @@ func (c *ServerContext) OpenPort(protocol string, port int) error {
 
 func (c *ServerContext) ClosePort(protocol string, port int) error {
 	c.ports.Remove(fmt.Sprintf("%d/%s", port, protocol))
+	return nil
+}
+
+func (c *ServerContext) OpenPorts(protocol string, from, to int) error {
+	panic("OpenPorts unimplemented")
+}
+
+func (c *ServerContext) AddMetric(string, string, time.Time) error {
 	return nil
 }
 

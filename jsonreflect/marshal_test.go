@@ -4,6 +4,7 @@ import (
 	"reflect"
 
 	gc "launchpad.net/gocheck"
+
 	"gopkg.in/juju-utils.v0/jsonreflect"
 )
 

@@ -6,9 +6,9 @@ import (
 	"os"
 	"regexp"
 
-	_ "github.com/juju/juju/provider/all"
+	"github.com/juju/juju/apiserver/params"
 	"github.com/juju/juju/juju"
-	"github.com/juju/juju/state/api/params"
+	_ "github.com/juju/juju/provider/all"
 )
 
 var help = `

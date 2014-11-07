@@ -10,8 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"launchpad.net/errgo/errors"
 	"github.com/juju/utils"
+	"launchpad.net/errgo/errors"
+
 	"gopkg.in/juju-utils.v0/charmbits/httpserver"
 	"gopkg.in/juju-utils.v0/hook"
 )

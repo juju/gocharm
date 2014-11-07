@@ -2,16 +2,17 @@ package main
 
 import (
 	"fmt"
-	"github.com/kr/fs"
 	"io/ioutil"
-	"launchpad.net/errgo/errors"
-	"github.com/juju/charm"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/kr/fs"
+	"gopkg.in/juju/charm.v4"
+	"launchpad.net/errgo/errors"
 )
 
 const hookMainCode = `
@@ -35,7 +36,7 @@ func main() {
 }
 `
 
-func processCharm(dir *charm.Dir) {
+func processCharm(dir *charm.CharmDir) {
 	isGo, err := isGoCharm(dir)
 	if err != nil {
 		warningf("cannot determine if %q is a Go charm: %v", dir.Path, err)
@@ -68,7 +69,7 @@ func processCharm(dir *charm.Dir) {
 	fmt.Printf("local:%s/%s-%d\n", series, dir.Meta().Name, dir.Revision())
 }
 
-func processGoCharm(dir *charm.Dir) (doneSomething bool, err error) {
+func processGoCharm(dir *charm.CharmDir) (doneSomething bool, err error) {
 	defer os.RemoveAll(filepath.Join(dir.Path, "pkg"))
 	if *test {
 		return false, errors.Wrap(testCharm(dir))
@@ -91,7 +92,7 @@ func processGoCharm(dir *charm.Dir) (doneSomething bool, err error) {
 	return true, nil
 }
 
-func isGoCharm(dir *charm.Dir) (bool, error) {
+func isGoCharm(dir *charm.CharmDir) (bool, error) {
 	info, err := os.Stat(filepath.Join(dir.Path, "src/runhook"))
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -120,7 +121,7 @@ func setenv(env []string, entry string) []string {
 	return append(env, entry)
 }
 
-func compile(dir *charm.Dir, binaryName string, mainCode string, crossCompile bool) error {
+func compile(dir *charm.CharmDir, binaryName string, mainCode string, crossCompile bool) error {
 	env := setenv(os.Environ(),
 		fmt.Sprintf("GOPATH=%s:%s", dir.Path, os.Getenv("GOPATH")),
 	)
@@ -146,7 +147,7 @@ func compile(dir *charm.Dir, binaryName string, mainCode string, crossCompile bo
 	return nil
 }
 
-func testCharm(dir *charm.Dir) error {
+func testCharm(dir *charm.CharmDir) error {
 	pkgs, err := packagesInDir(dir.Path)
 	if err != nil {
 		return errors.Wrap(err)

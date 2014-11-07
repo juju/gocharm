@@ -39,12 +39,14 @@
 // not declared, or there's a hook declared but no hooks are
 // registered for it, return an error.
 //
-// TODO(maybe) allow code to register relations, and either
+// TODO allow code to register relations, and either
 // validate against charm metadata or actually modify the
 // charm metadata in place (would require a charm.WriteMeta
 // function and users might not like that, as it may mess up formatting)
-// package hook; func (r *Registry) RegisterRelation(name string, rel charm.Relation)
+// package hook; func (r *Registry) RegisterRelation(rel charm.Relation)
 //
+// TODO allow code to register configuration options,
+// and
 // TODO allow install and start hooks to be omitted if desired - generate them
 // automatically if necessary.
 package main
@@ -53,11 +55,12 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
-	"launchpad.net/errgo/errors"
-	"github.com/juju/charm"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"gopkg.in/juju/charm.v4"
+	"launchpad.net/errgo/errors"
 )
 
 var repo = flag.String("repo", "", "charm repo directory (defaults to $JUJU_REPOSITORY)")
@@ -81,7 +84,7 @@ func main() {
 			fatalf("no charm repo directory specified")
 		}
 	}
-	var dirs []*charm.Dir
+	var dirs []*charm.CharmDir
 	if flag.NArg() > 0 {
 		dirs = readNamedCharms(flag.Args())
 	} else if *all {
@@ -102,8 +105,8 @@ func main() {
 	os.Exit(exitCode)
 }
 
-func appendCharmDir(dirs []*charm.Dir, path string) []*charm.Dir {
-	dir, err := charm.ReadDir(path)
+func appendCharmDir(dirs []*charm.CharmDir, path string) []*charm.CharmDir {
+	dir, err := charm.ReadCharmDir(path)
 	if err != nil {
 		errorf("cannot read %q: %v", path, err)
 		return dirs
@@ -111,8 +114,8 @@ func appendCharmDir(dirs []*charm.Dir, path string) []*charm.Dir {
 	return append(dirs, dir)
 }
 
-func readAllCharms() []*charm.Dir {
-	var dirs []*charm.Dir
+func readAllCharms() []*charm.CharmDir {
+	var dirs []*charm.CharmDir
 	paths, _ := filepath.Glob(filepath.Join(*repo, "*", "*", "metadata.yaml"))
 	for _, path := range paths {
 		dirs = appendCharmDir(dirs, filepath.Dir(path))
@@ -120,12 +123,12 @@ func readAllCharms() []*charm.Dir {
 	return dirs
 }
 
-func readNamedCharms(names []string) []*charm.Dir {
+func readNamedCharms(names []string) []*charm.CharmDir {
 	series, err := readRepoSeries()
 	if err != nil {
 		return nil
 	}
-	var dirs []*charm.Dir
+	var dirs []*charm.CharmDir
 	for _, name := range names {
 		if strings.Index(name, "/") != -1 {
 			dirs = appendCharmDir(dirs, filepath.Join(*repo, filepath.FromSlash(name)))
@@ -159,7 +162,7 @@ func readRepoSeries() ([]string, error) {
 	return series, nil
 }
 
-func charmFromCurrentDir() (*charm.Dir, error) {
+func charmFromCurrentDir() (*charm.CharmDir, error) {
 	dir, err := os.Getwd()
 	if err != nil {
 		return nil, err
@@ -178,5 +181,5 @@ func charmFromCurrentDir() (*charm.Dir, error) {
 		}
 		dir = parent
 	}
-	return charm.ReadDir(dir)
+	return charm.ReadCharmDir(dir)
 }

@@ -2,13 +2,14 @@ package hook
 
 import (
 	"fmt"
-	"launchpad.net/errgo/errors"
 	"net/rpc"
 	"os"
 	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
+
+	"launchpad.net/errgo/errors"
 )
 
 type hookFunc struct {
