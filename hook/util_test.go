@@ -14,8 +14,8 @@ import (
 	"github.com/juju/juju/apiserver/params"
 	"github.com/juju/juju/worker/uniter/context/jujuc"
 	"github.com/juju/utils/set"
+	. "gopkg.in/check.v1"
 	"gopkg.in/juju/charm.v4"
-	. "launchpad.net/gocheck"
 )
 
 func TestPackage(t *testing.T) { TestingT(t) }

@@ -8,8 +8,10 @@ import (
 
 	"github.com/juju/cmd"
 	"github.com/juju/juju/worker/uniter/context/jujuc"
+	jc "github.com/juju/testing/checkers"
+	gc "gopkg.in/check.v1"
+	"gopkg.in/juju/charm.v4"
 	"launchpad.net/errgo/errors"
-	gc "launchpad.net/gocheck"
 
 	"github.com/juju/gocharm/hook"
 )
@@ -300,6 +302,170 @@ func (s *HookSuite) TestRegister(c *gc.C) {
 		return nil
 	})
 	c.Assert(r.RegisteredHooks(), gc.DeepEquals, []string{"install"})
+}
+
+var registerRelationTests = []struct {
+	about       string
+	rel         charm.Relation
+	expect      charm.Relation
+	expectPanic string
+}{{
+	about: "requirer limit default = 1, scope default to global",
+	rel: charm.Relation{
+		Name:      "foo",
+		Interface: "bar",
+		Role:      charm.RoleRequirer,
+	},
+	expect: charm.Relation{
+		Name:      "foo",
+		Interface: "bar",
+		Role:      charm.RoleRequirer,
+		Scope:     charm.ScopeGlobal,
+		Limit:     1,
+	},
+}, {
+	about: "provider limit default = 0, scope default to global",
+	rel: charm.Relation{
+		Name:      "foo",
+		Interface: "bar",
+		Role:      charm.RoleProvider,
+	},
+	expect: charm.Relation{
+		Name:      "foo",
+		Interface: "bar",
+		Role:      charm.RoleProvider,
+		Scope:     charm.ScopeGlobal,
+	},
+}, {
+	about: "peer limit default = 1, scope default to global",
+	rel: charm.Relation{
+		Name:      "foo",
+		Interface: "bar",
+		Role:      charm.RolePeer,
+	},
+	expect: charm.Relation{
+		Name:      "foo",
+		Interface: "bar",
+		Limit:     1,
+		Role:      charm.RolePeer,
+		Scope:     charm.ScopeGlobal,
+	},
+}, {
+	about: "no defaults",
+	rel: charm.Relation{
+		Name:      "foo",
+		Interface: "bar",
+		Role:      charm.RoleProvider,
+		Limit:     2,
+		Scope:     charm.ScopeContainer,
+		Optional:  true,
+	},
+	expect: charm.Relation{
+		Name:      "foo",
+		Interface: "bar",
+		Role:      charm.RoleProvider,
+		Limit:     2,
+		Scope:     charm.ScopeContainer,
+		Optional:  true,
+	},
+}, {
+	about: "no name",
+	rel: charm.Relation{
+		Interface: "bar",
+		Role:      charm.RoleProvider,
+		Limit:     2,
+		Scope:     charm.ScopeContainer,
+		Optional:  true,
+	},
+	expectPanic: "no relation name given in .*",
+}, {
+	about: "no interface name",
+	rel: charm.Relation{
+		Name:     "foo",
+		Role:     charm.RoleProvider,
+		Limit:    2,
+		Scope:    charm.ScopeContainer,
+		Optional: true,
+	},
+	expectPanic: "no interface name given in .*",
+}, {
+	about: "no role",
+	rel: charm.Relation{
+		Name:      "foo",
+		Interface: "bar",
+		Limit:     2,
+		Scope:     charm.ScopeContainer,
+		Optional:  true,
+	},
+	expectPanic: "no role given in .*",
+}}
+
+func (s *HookSuite) TestRegisterRelation(c *gc.C) {
+	all := hook.NewRegistry()
+	allExpect := make(map[string]charm.Relation)
+	for i, test := range registerRelationTests {
+		c.Logf("%d: %s", i, test.about)
+		r := hook.NewRegistry()
+		if test.expectPanic != "" {
+			c.Assert(func() { r.RegisterRelation(test.rel) }, gc.PanicMatches, test.expectPanic)
+		} else {
+			r.RegisterRelation(test.rel)
+			c.Assert(r.RegisteredRelations(), jc.DeepEquals, map[string]charm.Relation{
+				test.rel.Name: test.expect,
+			})
+			rel := test.rel
+			rel.Name = fmt.Sprintf("%s%d", test.rel.Name, i)
+			all.RegisterRelation(rel)
+			expect := test.expect
+			expect.Name = rel.Name
+			allExpect[expect.Name] = expect
+		}
+	}
+	c.Assert(all.RegisteredRelations(), jc.DeepEquals, allExpect)
+}
+
+func (s *HookSuite) TestRegisterSameNameDifferentRelation(c *gc.C) {
+	r := hook.NewRegistry()
+	rel := charm.Relation{
+		Name:      "foo",
+		Interface: "bar",
+		Role:      charm.RoleRequirer,
+	}
+	r.RegisterRelation(rel)
+
+	// Check that it's OK to register again with the same relation.
+	r.RegisterRelation(rel)
+
+	// Check that it panics when something changes.
+	rel.Interface = "baz"
+	c.Assert(func() {
+		r.RegisterRelation(rel)
+	}, gc.PanicMatches, `relation "foo" is already registered with different details .*`)
+}
+
+func (s *HookSuite) TestRegisterConfig(c *gc.C) {
+	r := hook.NewRegistry()
+	opt0 := charm.Option{
+		Type:        "string",
+		Description: "d",
+		Default:     134,
+	}
+	r.RegisterConfig("opt0", opt0)
+	// Check that it's OK to register again with the same option.
+	r.RegisterConfig("opt0", opt0)
+
+	opt1 := opt0
+	opt1.Default = 135
+	c.Assert(func() {
+		r.RegisterConfig("opt0", opt1)
+	}, gc.PanicMatches, `configuration option "opt0" is already registered with different details .*`)
+
+	r.RegisterConfig("opt1", opt1)
+
+	c.Assert(r.RegisteredConfig(), jc.DeepEquals, map[string]charm.Option{
+		"opt0": opt0,
+		"opt1": opt1,
+	})
 }
 
 func (s *HookSuite) TestMain(c *gc.C) {

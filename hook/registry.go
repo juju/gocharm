@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"gopkg.in/juju/charm.v4"
 	"launchpad.net/errgo/errors"
 )
 
@@ -22,13 +23,17 @@ type Registry struct {
 	localStateName string
 	hooks          map[string][]hookFunc
 	commands       map[string]func()
+	relations      map[string]charm.Relation
+	config         map[string]charm.Option
 }
 
 // NewRegistry returns a new hook registry.
 func NewRegistry() *Registry {
 	return &Registry{
-		hooks:    make(map[string][]hookFunc),
-		commands: make(map[string]func()),
+		hooks:     make(map[string][]hookFunc),
+		commands:  make(map[string]func()),
+		relations: make(map[string]charm.Relation),
+		config:    make(map[string]charm.Option),
 	}
 }
 
@@ -71,6 +76,52 @@ func (r *Registry) RegisterCommand(name string, f func()) {
 	r.commands[name] = f
 }
 
+// RegisterRelation registers a relation to be included in the charm's
+// metadata.yaml. If a relation is registered twice with the same
+// name, all of the details must also match.
+// If the relation's scope is empty, charm.ScopeGlobal
+// is assumed. If rel.Limit is zero, it is assumed to be 1
+// if the role is charm.RolePeer or charm.RoleRequirer.
+func (r *Registry) RegisterRelation(rel charm.Relation) {
+	if rel.Name == "" {
+		panic(fmt.Errorf("no relation name given in %#v", rel))
+	}
+	if rel.Interface == "" {
+		panic(fmt.Errorf("no interface name given in relation %#v", rel))
+	}
+	if rel.Role == "" {
+		panic(fmt.Errorf("no role given in relation %#v", rel))
+	}
+	if rel.Limit == 0 && (rel.Role == charm.RolePeer || rel.Role == charm.RoleRequirer) {
+		rel.Limit = 1
+	}
+	if rel.Scope == "" {
+		rel.Scope = charm.ScopeGlobal
+	}
+	old, ok := r.relations[rel.Name]
+	if ok {
+		if old != rel {
+			panic(errors.Newf("relation %q is already registered with different details (%#v)", rel.Name, old))
+		}
+		return
+	}
+	r.relations[rel.Name] = rel
+}
+
+// RegisterConfig registers a configuration option to be included in
+// the charm's config.yaml. If an option is registered twice with the
+// same name, all of the details must also match.
+func (r *Registry) RegisterConfig(name string, opt charm.Option) {
+	old, ok := r.config[name]
+	if ok {
+		if old != opt {
+			panic(errors.Newf("configuration option %q is already registered with different details (%#v)", name, old))
+		}
+		return
+	}
+	r.config[name] = opt
+}
+
 // NewRegistry returns a sub-registry of r. Local state
 // stored by hooks registered with that will be stored relative to the
 // given name within r; likewise new registries created by NewRegistry
@@ -94,6 +145,18 @@ func (r *Registry) RegisteredHooks() []string {
 		names = append(names, name)
 	}
 	return names
+}
+
+// RegisteredRelations returns relations that have been
+// registered with RegisterRelation, keyed by relation name.
+func (r *Registry) RegisteredRelations() map[string]charm.Relation {
+	return r.relations
+}
+
+// RegisteredConfig returns the configuration options
+// that have been registered with RegisterConfig.
+func (r *Registry) RegisteredConfig() map[string]charm.Option {
+	return r.config
 }
 
 const (
