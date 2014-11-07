@@ -134,6 +134,8 @@ func (r *Registry) NewRegistry(localStateName string) *Registry {
 		localStateName: filepath.Join(r.localStateName, localStateName),
 		hooks:          r.hooks,
 		commands:       r.commands,
+		relations:      r.relations,
+		config:         r.config,
 	}
 }
 

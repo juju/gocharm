@@ -17,6 +17,7 @@ import (
 	serviceCommon "github.com/juju/juju/service/common"
 	"github.com/juju/juju/service/upstart"
 	"github.com/juju/names"
+	"gopkg.in/juju/charm.v4"
 	"launchpad.net/errgo/errors"
 
 	"github.com/juju/gocharm/hook"
@@ -59,7 +60,11 @@ func Register(r *hook.Registry, newHandler func() http.Handler) ServerGetter {
 			return f(srv)
 		})
 	}
-
+	r.RegisterConfig("server-port", charm.Option{
+		Type:        "int",
+		Description: "Port for the HTTP server to listen on",
+		Default:     8080,
+	})
 	register("config-changed", (*Server).configChanged)
 	register("stop", (*Server).uninstall)
 	r.RegisterCommand("server", func() {

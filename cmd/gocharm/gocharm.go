@@ -12,6 +12,7 @@ import (
 
 	"github.com/kr/fs"
 	"gopkg.in/juju/charm.v4"
+	"gopkg.in/yaml.v1"
 	"launchpad.net/errgo/errors"
 )
 
@@ -82,16 +83,77 @@ func processGoCharm(dir *charm.CharmDir) (doneSomething bool, err error) {
 	if _, err := os.Stat(filepath.Join(dir.Path, "bin", "runhook")); err != nil {
 		return false, errors.New("runhook command not built")
 	}
-	hooks, err := registeredHooks(dir)
+	info, err := registeredCharmInfo(dir)
 	if err != nil {
 		return false, errors.Wrap(err)
 	}
+
+	// TODO change writeHooks, writeMeta and writeConfig
+	// so that they also return doneSomething.
+
 	// We always want to generate a stop hook.
-	hooks["stop"] = true
-	if err := writeHooks(dir, hooks); err != nil {
+	info.Hooks["stop"] = true
+	if err := writeHooks(dir, info.Hooks); err != nil {
 		return false, errors.Wrapf(err, "cannot write hooks to charm")
 	}
+	if err := writeMeta(dir, info.Relations); err != nil {
+		return false, errors.Wrapf(err, "cannot write metadata.yaml")
+	}
+	if err := writeConfig(dir, info.Config); err != nil {
+		return false, errors.Wrapf(err, "cannot write config.yaml")
+	}
+
+	// Sanity check that the new config files parse correctly.
+	_, err = charm.ReadCharmDir(dir.Path)
+	if err != nil {
+		return false, errors.Wrapf(err, "charm will not read correctly; we've broken it, sorry")
+	}
 	return true, nil
+}
+
+func writeMeta(dir *charm.CharmDir, relations map[string]charm.Relation) error {
+	meta := *dir.Meta()
+	meta.Provides = make(map[string]charm.Relation)
+	meta.Requires = make(map[string]charm.Relation)
+	meta.Peers = make(map[string]charm.Relation)
+
+	for name, rel := range relations {
+		switch rel.Role {
+		case charm.RoleProvider:
+			meta.Provides[name] = rel
+		case charm.RoleRequirer:
+			meta.Requires[name] = rel
+		case charm.RolePeer:
+			meta.Peers[name] = rel
+		default:
+			return errors.Newf("unknown role %q in relation", rel.Role)
+		}
+	}
+	data, err := yaml.Marshal(&meta)
+	if err != nil {
+		return errors.Wrapf(err, "cannot marshal metadata.yaml")
+	}
+	if err := ioutil.WriteFile(filepath.Join(dir.Path, "metadata.yaml"), data, 0666); err != nil {
+		return errors.Wrap(err)
+	}
+	return nil
+}
+
+func writeConfig(dir *charm.CharmDir, config map[string]charm.Option) error {
+	configPath := filepath.Join(dir.Path, "config.yaml")
+	if len(config) == 0 {
+		return os.Remove(configPath)
+	}
+	data, err := yaml.Marshal(&charm.Config{
+		Options: config,
+	})
+	if err != nil {
+		return errors.Wrapf(err, "cannot marshal config.yaml")
+	}
+	if err := ioutil.WriteFile(configPath, data, 0666); err != nil {
+		return errors.Wrap(err)
+	}
+	return nil
 }
 
 func isGoCharm(dir *charm.CharmDir) (bool, error) {
