@@ -1,10 +1,10 @@
-// The httpserver package can be used in a charm to implement an
+// The httpservercharm package can be used in a charm to implement an
 // http server. The port of the server is configured with the
 // "server-port" charm configuration option, which should
 // be added to config.yaml with integer type.
 //
 // This package is currently highly experimental.
-package httpserver
+package httpservercharm
 
 import (
 	"flag"
@@ -50,43 +50,24 @@ type ServerGetter func(*hook.Context) (*Server, error)
 // Register registers the handlers and commands necessary for
 // starting an http server in a charm that will serve content
 // using the handler created by calling newHandler.
-func Register(r *hook.Registry, newHandler func() http.Handler) ServerGetter {
-	register := func(hookName string, f func(*Server) error) {
-		r.Register(hookName, func(ctxt *hook.Context) error {
-			srv, err := getServer(ctxt)
-			if err != nil {
-				return errors.Wrap(err)
-			}
-			return f(srv)
-		})
-	}
+func (srv *Server) Register(r *hook.Registry, newHandler func() http.Handler) {
+	r.RegisterContext(srv.setContext)
 	r.RegisterConfig("server-port", charm.Option{
 		Type:        "int",
 		Description: "Port for the HTTP server to listen on",
 		Default:     8080,
 	})
-	register("config-changed", (*Server).configChanged)
-	register("stop", (*Server).uninstall)
+	r.RegisterHook("config-changed", srv.configChanged)
+	r.RegisterHook("stop", srv.uninstall)
 	r.RegisterCommand("server", func() {
 		serverCommand(newHandler)
 	})
-	return func(ctxt *hook.Context) (*Server, error) {
-		return getServer(r.LocalContext(ctxt))
-	}
 }
 
-// getServer returns the charm's HTTP server state.
-//
-// Although it returns a new instance of the server type, its
-// serverState fields are persistently stored using the hook package's
-// local-state mechanism.
-func getServer(ctxt *hook.Context) (*Server, error) {
-	srv := &Server{
-		ctxt: ctxt,
-	}
+func (srv *Server) setContext(ctxt *hook.Context) error {
 	port0, err := ctxt.GetConfig("server-port")
 	if err != nil {
-		return nil, errors.Wrap(err)
+		return errors.Wrapf(err, "cannot set server context")
 	}
 	if port0 != nil {
 		port := int(port0.(float64))
@@ -97,9 +78,10 @@ func getServer(ctxt *hook.Context) (*Server, error) {
 		}
 	}
 	if err := ctxt.LocalState("server", &srv.state); err != nil {
-		return nil, errors.Wrap(err)
+		return errors.Wrap(err)
 	}
-	return srv, nil
+	srv.ctxt = ctxt
+	return nil
 }
 
 // PrivateAddress returns the TCP address of the HTTP server.

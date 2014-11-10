@@ -65,12 +65,6 @@ func (ctxt *Context) withLocalStateName(localStateName string) *Context {
 	}
 }
 
-// LocalContext transforms an existing
-// context into a context with state local to r.
-func (r *Registry) LocalContext(ctxt *Context) *Context {
-	return ctxt.withLocalStateName(r.localStateName)
-}
-
 // hookStateDir is where hook local state will be stored.
 var hookStateDir = "/var/lib/juju-localstate"
 

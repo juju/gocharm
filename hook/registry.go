@@ -15,8 +15,13 @@ import (
 
 type hookFunc struct {
 	localStateName string
-	run            func(ctxt *Context) error
+	run            func() error
 }
+
+// ContextSetter is the type of a function that can
+// set the context for a hook. Usually this is
+// a method that sets a context variable inside a struct.
+type ContextSetter func(ctxt *Context) error
 
 // Registry allows the registration of hook functions.
 type Registry struct {
@@ -25,6 +30,7 @@ type Registry struct {
 	commands       map[string]func()
 	relations      map[string]charm.Relation
 	config         map[string]charm.Option
+	contexts       *[]ContextSetter
 }
 
 // NewRegistry returns a new hook registry.
@@ -34,19 +40,16 @@ func NewRegistry() *Registry {
 		commands:  make(map[string]func()),
 		relations: make(map[string]charm.Relation),
 		config:    make(map[string]charm.Option),
+		contexts:  new([]ContextSetter),
 	}
 }
 
-// Register registers the given function to be called when the
+// RegisterHook registers the given function to be called when the
 // charm hook with the given name is invoked.
-// The function must not use its provided Context
-// after it returns.
 //
 // If more than one function is registered for a given hook,
-// each function will be called in turn until one returns an error;
-// the context's local state will be saved with SaveState
-// after each call.
-func (r *Registry) Register(name string, f func(ctxt *Context) error) {
+// each function will be called in turn until one returns an error.
+func (r *Registry) RegisterHook(name string, f func() error) {
 	// TODO(rog) implement validHookName
 	//if !validHookName(name) {
 	//	panic(fmt.Errorf("invalid hook name %q", name))
@@ -54,6 +57,14 @@ func (r *Registry) Register(name string, f func(ctxt *Context) error) {
 	r.hooks[name] = append(r.hooks[name], hookFunc{
 		run:            f,
 		localStateName: r.localStateName,
+	})
+}
+
+// RegisterContext registers a function that will be called
+// to set up a context before any hook function execution.
+func (r *Registry) RegisterContext(setter ContextSetter) {
+	*r.contexts = append(*r.contexts, func(ctxt *Context) error {
+		return setter(ctxt.withLocalStateName(r.localStateName))
 	})
 }
 
@@ -136,6 +147,7 @@ func (r *Registry) NewRegistry(localStateName string) *Registry {
 		commands:       r.commands,
 		relations:      r.relations,
 		config:         r.config,
+		contexts:       r.contexts,
 	}
 }
 
@@ -229,8 +241,15 @@ func Main(r *Registry) (err error) {
 		return errors.Wrap(err)
 	}
 	defer ctxt.close()
+
+	// Notify everyone about the context.
+	for _, ctxtf := range *r.contexts {
+		if err := ctxtf(ctxt); err != nil {
+			return errors.Wrapf(err, "cannot set context")
+		}
+	}
 	defer func() {
-		// Save the state after all hooks have been run.
+		// All the hooks have now run; save the state.
 		if saveErr := ctxt.saveState(); saveErr != nil {
 			if err == nil {
 				err = errors.Wrapf(saveErr, "cannot save local state")
@@ -245,8 +264,7 @@ func Main(r *Registry) (err error) {
 		return usageError(r)
 	}
 	for _, f := range hookFuncs {
-		ctxt := ctxt.withLocalStateName(f.localStateName)
-		if err := f.run(ctxt); err != nil {
+		if err := f.run(); err != nil {
 			// TODO better error context here, perhaps
 			// including local state name, hook name, etc.
 			return errors.Wrap(err)
