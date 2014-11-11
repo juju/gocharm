@@ -1,6 +1,8 @@
 // The hook package provides a Go interface to the
 // Juju charm hook commands. It is designed to be used
 // alongside the gocharm command (github.com/juju/gocharm/cmd/gocharm)
+//
+// TODO explain more about relations, relation ids and relation units.
 package hook
 
 import (
@@ -149,6 +151,7 @@ func (ctxt *Context) saveState() error {
 		if err != nil {
 			return errors.Wrapf(err, "could not marshal state %q", path)
 		}
+		// TODO optimise so this so it only writes if the data has actually changed.
 		if err := ioutil.WriteFile(path, data, 0600); err != nil {
 			return errors.Wrapf(err, "could not save state to %q", path)
 		}
@@ -156,11 +159,9 @@ func (ctxt *Context) saveState() error {
 	return nil
 }
 
-// CommandName returns a value that can be used to
-// make runhook run the given command when passed
-// as its first argument.
-// The command name is relative to the registry
-// from which ctxt was created.
+// CommandName returns a value that can be used to make runhook run the
+// given command when passed as its first argument. The command name is
+// relative to the registry from which ctxt was created.
 // TODO better explanation and an example.
 func (ctxt *Context) CommandName(name string) string {
 	// TODO panic if name is empty?
@@ -255,7 +256,7 @@ func (ctxt *Context) GetAllRelationUnit(relationId, unit string) (map[string]str
 }
 
 // RelationIds returns all the relation ids associated
-// with the relation with the given name,
+// with the relation with the given name.
 func (ctxt *Context) RelationIds(relationName string) ([]string, error) {
 	var val []string
 	if err := ctxt.runJson(&val, "relation-ids", "--format", "json", "--", relationName); err != nil {
@@ -264,6 +265,7 @@ func (ctxt *Context) RelationIds(relationName string) ([]string, error) {
 	return val, nil
 }
 
+// RelationUnits returns all the units associated with the given relation id.
 func (ctxt *Context) RelationUnits(relationId string) ([]string, error) {
 	var val []string
 	if err := ctxt.runJson(&val, "relation-list", "--format", "json", "-r", relationId); err != nil {
@@ -274,7 +276,7 @@ func (ctxt *Context) RelationUnits(relationId string) ([]string, error) {
 
 // AllRelationUnits returns a map from all the relation ids
 // for the relation with the given name to all the
-// units with that name
+// units with that name.
 func (ctxt *Context) AllRelationUnits(relationName string) (map[string][]string, error) {
 	allUnits := make(map[string][]string)
 	ids, err := ctxt.RelationIds(relationName)
