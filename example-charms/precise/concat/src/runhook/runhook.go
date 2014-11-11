@@ -14,7 +14,7 @@ import (
 	"gopkg.in/juju/charm.v4"
 	"launchpad.net/errgo/errors"
 
-	"github.com/juju/gocharm/charmbits/httpservercharm"
+	"github.com/juju/gocharm/charmbits/httpcharm"
 	"github.com/juju/gocharm/hook"
 )
 
@@ -34,7 +34,7 @@ func RegisterHooks(r *hook.Registry) {
 		Type:        "string",
 	})
 	var concat concatenator
-	concat.srv.Register(r.NewRegistry("httpserver"), newHandler)
+	concat.http.Register(r.NewRegistry("httpserver"), "http", newHandler)
 	r.RegisterContext(concat.setContext)
 	r.RegisterHook("upstream-relation-changed", concat.changed)
 	r.RegisterHook("upstream-relation-departed", concat.changed)
@@ -44,7 +44,7 @@ func RegisterHooks(r *hook.Registry) {
 
 type concatenator struct {
 	ctxt *hook.Context
-	srv  httpservercharm.Server
+	http  httpcharm.Provider
 }
 
 func (c *concatenator) setContext(ctxt *hook.Context) error {
@@ -121,7 +121,7 @@ func (c *concatenator) setCurrentVal(val string) error {
 
 func (c *concatenator) notifyHTTPServer(currentVal string) error {
 	c.ctxt.Logf("notifyHTTPServer of %q", currentVal)
-	addr, err := c.srv.PrivateAddress()
+	addr, err := c.http.PrivateAddress()
 	if err != nil {
 		return errors.Wrap(err)
 	}
