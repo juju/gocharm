@@ -298,9 +298,7 @@ func (s *HookSuite) TestGetAllConfig(c *gc.C) {
 
 func (s *HookSuite) TestRegister(c *gc.C) {
 	r := hook.NewRegistry()
-	r.Register("install", func(ctxt *hook.Context) error {
-		return nil
-	})
+	r.RegisterHook("install", func() error { return nil })
 	c.Assert(r.RegisteredHooks(), gc.DeepEquals, []string{"install"})
 }
 
@@ -472,7 +470,7 @@ func (s *HookSuite) TestMain(c *gc.C) {
 	s.StartServer(c, 0, "peer0/0")
 	called := false
 	r := hook.NewRegistry()
-	r.Register("peer-relation-changed", func(ctxt *hook.Context) error {
+	registerSimpleHook(r, "peer-relation-changed", func(ctxt *hook.Context) error {
 		called = true
 		var localState *string
 		err := ctxt.LocalState("x", &localState)
@@ -500,7 +498,7 @@ func (s *HookSuite) TestMain(c *gc.C) {
 func (s *HookSuite) TestMainFailsWhenCannotSaveState(c *gc.C) {
 	s.StartServer(c, 0, "peer0/0")
 	r := hook.NewRegistry()
-	r.Register("peer-relation-changed", func(ctxt *hook.Context) error {
+	registerSimpleHook(r, "peer-relation-changed", func(ctxt *hook.Context) error {
 		var x *int
 		if err := ctxt.LocalState("x", &x); err != nil {
 			return errors.Wrap(err)
@@ -519,7 +517,7 @@ func (s *HookSuite) TestMainCleansUpLocalStateOnStopHook(c *gc.C) {
 	s.StartServer(c, 0, "peer0/0")
 	r := hook.NewRegistry()
 	r1 := r.NewRegistry("sub")
-	r1.Register("peer-relation-changed", func(ctxt *hook.Context) error {
+	registerSimpleHook(r1, "peer-relation-changed", func(ctxt *hook.Context) error {
 		var x *int
 		return ctxt.LocalState("x", &x)
 	})
@@ -558,8 +556,8 @@ func (s *HookSuite) TestMainUsage(c *gc.C) {
 	r := hook.NewRegistry()
 	r.RegisterCommand("server", func() {})
 	r.RegisterCommand("client", func() {})
-	r.Register("peer-relation-changed", func(*hook.Context) error { return nil })
-	r.Register("config-changed", func(*hook.Context) error { return nil })
+	r.RegisterHook("peer-relation-changed", func() error { return nil })
+	r.RegisterHook("config-changed", func() error { return nil })
 	os.Args = []string{"exe"}
 	err := hook.Main(r)
 	c.Assert(err, gc.ErrorMatches, `usage: runhook cmd-server \[arg\.\.\.]
@@ -585,14 +583,14 @@ func (s *HookSuite) TestCommandCall(c *gc.C) {
 	r1.RegisterCommand("main", cmdFunc("main-sub"))
 
 	var cmdNames []string
-	r.Register("install", func(ctxt *hook.Context) error {
+	registerSimpleHook(r, "install", func(ctxt *hook.Context) error {
 		cmdNames = append(cmdNames,
 			ctxt.CommandName("main"),
 			ctxt.CommandName("other"),
 		)
 		return nil
 	})
-	r1.Register("install", func(ctxt *hook.Context) error {
+	registerSimpleHook(r1, "install", func(ctxt *hook.Context) error {
 		cmdNames = append(cmdNames,
 			ctxt.CommandName("main"),
 		)
@@ -642,15 +640,15 @@ func localStateHookFunc(name string) func(*hook.Context) error {
 }
 
 func registerLevel1(name string, r *hook.Registry) {
-	r.Register("config-changed", localStateHookFunc(name+"-0"))
-	r.Register("peer-relation-changed", localStateHookFunc(name+"-0"))
+	registerSimpleHook(r, "config-changed", localStateHookFunc(name+"-0"))
+	registerSimpleHook(r, "peer-relation-changed", localStateHookFunc(name+"-0"))
 }
 
 func registerLevel0(r *hook.Registry) {
 	registerLevel1("level1-0", r.NewRegistry("level1-0"))
 	registerLevel1("level1-1", r.NewRegistry("level1-1"))
-	r.Register("config-changed", localStateHookFunc("level0-config"))
-	r.Register("other-relation-changed", localStateHookFunc("level0-other"))
+	registerSimpleHook(r, "config-changed", localStateHookFunc("level0-config"))
+	registerSimpleHook(r, "other-relation-changed", localStateHookFunc("level0-other"))
 }
 
 func (s *HookSuite) TestHierarchicalLocalState(c *gc.C) {
@@ -697,9 +695,20 @@ func (s *HookSuite) TestHierarchicalLocalState(c *gc.C) {
 func (s *HookSuite) TestMainWithUnregisteredHook(c *gc.C) {
 	s.StartServer(c, 0, "peer0/0")
 	r := hook.NewRegistry()
-	r.Register("install", func(*hook.Context) error { return nil })
+	registerSimpleHook(r, "install", func(*hook.Context) error { return nil })
 	os.Args = []string{"exe", "peer-relation-changed"}
 	err := hook.Main(r)
 	c.Assert(err, gc.ErrorMatches, `usage: runhook install
 	| runhook stop`)
+}
+
+func registerSimpleHook(r *hook.Registry, hookName string, hookFunc func(ctxt *hook.Context) error) {
+	var ctxt *hook.Context
+	r.RegisterContext(func(c *hook.Context) error {
+		ctxt = c
+		return nil
+	})
+	r.RegisterHook(hookName, func() error {
+		return hookFunc(ctxt)
+	})
 }

@@ -14,7 +14,7 @@ import (
 	"gopkg.in/juju/charm.v4"
 	"launchpad.net/errgo/errors"
 
-	"github.com/juju/gocharm/charmbits/httpserver"
+	"github.com/juju/gocharm/charmbits/httpservercharm"
 	"github.com/juju/gocharm/hook"
 )
 
@@ -33,38 +33,23 @@ func RegisterHooks(r *hook.Registry) {
 		Description: "A string value",
 		Type:        "string",
 	})
-	getServer := httpserver.Register(r.NewRegistry("httpserver"), newHandler)
-	register := func(hookName string, f func(*concatenator) error) {
-		r.Register(hookName, func(ctxt *hook.Context) error {
-			c, err := newConcatenator(ctxt, getServer)
-			if err != nil {
-				return errors.Wrap(err)
-			}
-			return f(c)
-		})
-	}
-	r.Register("install", nothing)
-	r.Register("start", nothing)
-	register("config-changed", (*concatenator).changed)
-	register("upstream-relation-changed", (*concatenator).changed)
-	register("upstream-relation-departed", (*concatenator).changed)
-	register("downstream-relation-joined", (*concatenator).changed)
+	var concat concatenator
+	concat.srv.Register(r.NewRegistry("httpserver"), newHandler)
+	r.RegisterContext(concat.setContext)
+	r.RegisterHook("upstream-relation-changed", concat.changed)
+	r.RegisterHook("upstream-relation-departed", concat.changed)
+	r.RegisterHook("downstream-relation-joined", concat.changed)
+	r.RegisterHook("config-changed", concat.changed)
 }
 
 type concatenator struct {
 	ctxt *hook.Context
-	srv  *httpserver.Server
+	srv  httpservercharm.Server
 }
 
-func newConcatenator(ctxt *hook.Context, newServer httpserver.ServerGetter) (*concatenator, error) {
-	srv, err := newServer(ctxt)
-	if err != nil {
-		return nil, errors.Wrap(err)
-	}
-	return &concatenator{
-		ctxt: ctxt,
-		srv:  srv,
-	}, nil
+func (c *concatenator) setContext(ctxt *hook.Context) error {
+	c.ctxt = ctxt
+	return nil
 }
 
 func (c *concatenator) changed() error {
