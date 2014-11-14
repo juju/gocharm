@@ -18,7 +18,7 @@ import (
 // writeHooks ensures that the charm has the given set of hooks.
 // TODO write install and start hooks even if they're not registered,
 // because otherwise it won't be treated as a valid charm.
-func writeHooks(dir *charm.CharmDir, hooks map[string]bool) error {
+func writeHooks(dir *charm.CharmDir, hooks []string) error {
 	if *verbose {
 		log.Printf("writing hooks in %s", dir.Path)
 	}
@@ -46,7 +46,13 @@ func writeHooks(dir *charm.CharmDir, hooks map[string]bool) error {
 			continue
 		}
 		sameContents, contentsErr := fileHasContents(hookPath, hookStub(info.Name()))
-		if hooks[info.Name()] {
+		for _, hook := range hooks {
+			if hook == info.Name() {
+				found[info.Name()] = true
+				break
+			}
+		}
+		if found[info.Name()] {
 			if contentsErr != nil {
 				return errors.Wrapf(err, "cannot replace %q")
 			}
@@ -56,7 +62,6 @@ func writeHooks(dir *charm.CharmDir, hooks map[string]bool) error {
 			if *verbose {
 				log.Printf("found existing hook %s", hookPath)
 			}
-			found[info.Name()] = true
 		} else {
 			if contentsErr != nil {
 				warningf("not removing %q", contentsErr)
@@ -75,7 +80,7 @@ func writeHooks(dir *charm.CharmDir, hooks map[string]bool) error {
 		}
 	}
 	// Add any new hooks we need to the charm directory.
-	for hookName := range hooks {
+	for _, hookName := range hooks {
 		hookPath := filepath.Join(hookDir, hookName)
 		if !found[hookName] {
 			if *verbose {
@@ -151,7 +156,7 @@ func hookStub(hookName string) []byte {
 // Note that this must be kept in sync with the
 // version in inspectCode below.
 type charmInfo struct {
-	Hooks     map[string]bool
+	Hooks     []string
 	Relations map[string]charm.Relation
 	Config    map[string]charm.Option
 }
@@ -172,7 +177,7 @@ import (
 // charmInfo must be kept in sync with the charmInfo
 // type above.
 type charmInfo struct {
-	Hooks     map[string]bool
+	Hooks     []string
 	Relations map[string]charm.Relation
 	Config    map[string]charm.Option
 }
@@ -180,12 +185,9 @@ type charmInfo struct {
 func main() {
 	r := hook.NewRegistry()
 	runhook.RegisterHooks(r)
-	hookMap := make(map[string]bool)
-	for _, hook := range r.RegisteredHooks() {
-		hookMap[hook] = true
-	}
+	hook.RegisterMainHooks(r)
 	data, err := json.Marshal(charmInfo{
-		Hooks:     hookMap,
+		Hooks:     r.RegisteredHooks(),
 		Relations: r.RegisteredRelations(),
 		Config:    r.RegisteredConfig(),
 	})
