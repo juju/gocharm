@@ -29,9 +29,14 @@ import (
 	"os"
 )
 
+func nop() error {
+	return nil
+}
+
 func main() {
 	r := hook.NewRegistry()
 	runhook.RegisterHooks(r)
+	hook.RegisterMainHooks(r)
 	if err := hook.Main(r); err != nil {
 		fmt.Fprintf(os.Stderr, "runhook: %v\n", err)
 		os.Exit(1)
@@ -91,8 +96,6 @@ func processGoCharm(dir *charm.CharmDir) (doneSomething bool, err error) {
 	// TODO change writeHooks, writeMeta and writeConfig
 	// so that they also return doneSomething.
 
-	// We always want to generate a stop hook.
-	info.Hooks["stop"] = true
 	if err := writeHooks(dir, info.Hooks); err != nil {
 		return false, errors.Wrapf(err, "cannot write hooks to charm")
 	}

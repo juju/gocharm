@@ -47,8 +47,12 @@ func NewRegistry() *Registry {
 // RegisterHook registers the given function to be called when the
 // charm hook with the given name is invoked.
 //
+// If the name is "*", the function will always be invoked, after
+// any functions registered specifically for the current hook.
+//
 // If more than one function is registered for a given hook,
-// each function will be called in turn until one returns an error.
+// each function will be called in order of registration until
+// one returns an error.
 func (r *Registry) RegisterHook(name string, f func() error) {
 	// TODO(rog) implement validHookName
 	//if !validHookName(name) {
@@ -152,11 +156,13 @@ func (r *Registry) NewRegistry(localStateName string) *Registry {
 }
 
 // RegisteredHooks returns the names of all currently
-// registered hooks.
+// registered hooks, excluding wildcard ("*") hooks.
 func (r *Registry) RegisteredHooks() []string {
 	var names []string
 	for name := range r.hooks {
-		names = append(names, name)
+		if name != "*" {
+			names = append(names, name)
+		}
 	}
 	return names
 }
@@ -206,10 +212,6 @@ func usageError(r *Registry) error {
 	for hook := range r.hooks {
 		allowed = append(allowed, hook)
 	}
-	// The stop hook is always allowed.
-	if r.hooks["stop"] == nil {
-		allowed = append(allowed, "stop")
-	}
 	sort.Strings(allowed[0:len(r.commands)])
 	sort.Strings(allowed[len(r.commands):])
 	return errors.Newf("usage: runhook %s", strings.Join(allowed, "\n\t| runhook "))
@@ -218,10 +220,10 @@ func usageError(r *Registry) error {
 // Main creates a new context from the environment and invokes the
 // appropriate command or hook functions from the given
 // registry or sub-registries of it.
+//
+// This function is designed to be called by gocharm
+// generated code only.
 func Main(r *Registry) (err error) {
-	if len(r.hooks) == 0 && len(r.commands) == 0 {
-		return fmt.Errorf("no registered hooks or commands")
-	}
 	if len(os.Args) < 2 {
 		return usageError(r)
 	}
@@ -258,11 +260,16 @@ func Main(r *Registry) (err error) {
 			}
 		}
 	}()
-	hookFuncs, ok := r.hooks[ctxt.HookName]
-	if !ok && ctxt.HookName != "stop" {
+
+	// The wildcard hook always runs after any other
+	// registered hooks.
+	hookFuncs := r.hooks[ctxt.HookName]
+
+	if len(hookFuncs) == 0 {
 		ctxt.Logf("hook %q not registered", ctxt.HookName)
 		return usageError(r)
 	}
+	hookFuncs = append(hookFuncs, r.hooks["*"]...)
 	for _, f := range hookFuncs {
 		if err := f.run(); err != nil {
 			// TODO better error context here, perhaps
@@ -270,13 +277,39 @@ func Main(r *Registry) (err error) {
 			return errors.Wrap(err)
 		}
 	}
-	if ctxt.HookName == "stop" {
+	return nil
+}
+
+func nop() error {
+	return nil
+}
+
+// RegisterMainHooks registers any hooks that
+// are needed by any charm. It should be
+// called after any other Register functions.
+//
+// This function is designed to be called by gocharm
+// generated code only.
+func RegisterMainHooks(r *Registry) {
+	// We always need install and start hooks.
+	r.RegisterHook("install", nop)
+	r.RegisterHook("start", nop)
+	var ctxt *Context
+	r.RegisterContext(func(hctxt *Context) error {
+		ctxt = hctxt
+		return nil
+	})
+	// Ensure that we have a stop hook and that
+	// it is called after every other hook, including
+	// wildcard hooks.
+	r.RegisterHook("stop", nop)
+	r.RegisterHook("*", func() error {
 		// We've shut down, so clean up all our local state.
 		if err := os.RemoveAll(ctxt.StateDir()); err != nil {
 			return errors.Wrapf(err, "cannot remove local state")
 		}
-	}
-	return nil
+		return nil
+	})
 }
 
 // newContext creates a hook context from the current environment.
