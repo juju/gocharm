@@ -10,7 +10,6 @@ import (
 
 	serviceCommon "github.com/juju/juju/service/common"
 	"github.com/juju/juju/service/upstart"
-	"github.com/juju/names"
 	"github.com/juju/utils"
 	"launchpad.net/errgo/errors"
 
@@ -22,7 +21,7 @@ import (
 type Service struct {
 	ctxt        *hook.Context
 	serviceName string
-	state       *localState
+	state       localState
 	rpcClient   *rpc.Client
 }
 
@@ -30,48 +29,45 @@ type localState struct {
 	Installed bool
 }
 
-const commandName = "server"
-
-// Register registers the service with the given registry.
-// If serviceName is non-empty, it specifies the name
-// of the service, otherwise the service will be named
-// after the charm's unit.
+// Register registers the service with the given registry. If
+// serviceName is non-empty, it specifies the name of the service,
+// otherwise the service will be named after the charm's unit.
 //
-// The serviceRPC parameter defines any methods that
-// can be invoked locally on the service, defined as for
-// the rpc package (see rpc.Server.Register). When the
-// service has been started, these methods may be
-// invoked using the Service.Call method. Parameters and
+// The serviceRPC parameter defines any methods that can be invoked
+// locally on the service, defined as for the rpc package (see
+// rpc.Server.Register). When the service has been started, these
+// methods may be invoked using the Service.Call method. Parameters and
 // return values will be marshaled as JSON.
 func (svc *Service) Register(r *hook.Registry, serviceName string, serviceRPC interface{}) {
 	svc.serviceName = serviceName
-	r.RegisterContext(svc.setContext)
+	r.RegisterContext(svc.setContext, &svc.state)
 	// TODO restart the service when the charm is upgraded.
 	// We could also perhaps provide some way to do zero-downtime
 	// upgrades.
 	//r.RegisterHook("upgrade-charm", svc.upgradeCharm)
-	r.RegisterCommand(commandName, func() {
-		runServer(serviceRPC)
+	r.RegisterCommand(func(args []string) {
+		runServer(serviceRPC, args)
 	})
 }
 
 func (svc *Service) setContext(ctxt *hook.Context) error {
 	svc.ctxt = ctxt
-	if err := ctxt.LocalState("service", &svc.state); err != nil {
-		return errors.Wrap(err)
-	}
 	return nil
 }
 
 // Start starts the service if it is not already started.
 func (svc *Service) Start() error {
+	svc.ctxt.Logf("starting service")
 	usvc := svc.upstartService()
 	if !svc.state.Installed {
+		svc.ctxt.Logf("installing service")
 		if err := usvc.Install(); err != nil {
 			return errors.Wrap(err)
 		}
 		svc.state.Installed = true
 		return nil
+	} else {
+		svc.ctxt.Logf("service already installed")
 	}
 	if err := usvc.Start(); err != nil {
 		return errors.Wrap(err)
@@ -133,14 +129,14 @@ func (svc *Service) Call(method string, args interface{}, reply interface{}) err
 }
 
 func (svc *Service) socketPath() string {
-	return "@" + filepath.Join(svc.ctxt.StateDir(), "servicez")
+	return "@" + filepath.Join(svc.ctxt.StateDir(), "service")
 }
 
 func (svc *Service) upstartService() *upstart.Service {
 	exe := filepath.Join(svc.ctxt.CharmDir, "bin", "runhook")
 	serviceName := svc.serviceName
 	if serviceName == "" {
-		serviceName = names.NewUnitTag(svc.ctxt.Unit).String()
+		serviceName = svc.ctxt.Unit.Tag().String()
 	}
 	return &upstart.Service{
 		Name: serviceName,
@@ -149,7 +145,7 @@ func (svc *Service) upstartService() *upstart.Service {
 			Desc:    fmt.Sprintf("service for juju unit %q", svc.ctxt.Unit),
 			Cmd: fmt.Sprintf("%s %s %q",
 				exe,
-				svc.ctxt.CommandName(commandName),
+				svc.ctxt.CommandName(),
 				svc.socketPath(),
 			),
 			// TODO save output somewhere - we need a better answer for that.

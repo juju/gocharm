@@ -6,6 +6,7 @@ package runhook
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"gopkg.in/juju/charm.v4"
@@ -34,10 +35,10 @@ func RegisterHooks(r *hook.Registry) {
 		Type:        "string",
 	})
 	var concat concatenator
-	concat.http.Register(r.NewRegistry("httpserver"), "http", &concat)
-	concat.svc.Register(r.NewRegistry("service"), "", new(ConcatServer))
+	concat.http.Register(r.Clone("httpserver"), "http", &concat)
+	concat.svc.Register(r.Clone("service"), "", new(ConcatServer))
 
-	r.RegisterContext(concat.setContext)
+	r.RegisterContext(concat.setContext, &concat.state)
 
 	// Note that registered hooks are called in order, so the
 	// functions below are guaranteed to run after any callbacks
@@ -46,7 +47,11 @@ func RegisterHooks(r *hook.Registry) {
 	r.RegisterHook("upstream-relation-changed", concat.changed)
 	r.RegisterHook("upstream-relation-departed", concat.changed)
 	r.RegisterHook("downstream-relation-joined", concat.changed)
+	r.RegisterHook("charm-upgraded", concat.changed)
 	r.RegisterHook("config-changed", concat.changed)
+
+	// The finall method runs after any other hook, and
+	// reconciles any state changed by the hooks.
 	r.RegisterHook("*", concat.finally)
 }
 
@@ -62,20 +67,18 @@ type concatenator struct {
 	ctxt     *hook.Context
 	http     httpcharm.Provider
 	svc      service.Service
-	state    *localState
+	state    localState
 	oldState localState
 }
 
 func (c *concatenator) setContext(ctxt *hook.Context) error {
 	c.ctxt = ctxt
-	if err := ctxt.LocalState("state", &c.state); err != nil {
-		return errors.Wrap(err)
-	}
-	c.oldState = *c.state
+	c.oldState = c.state
 	return nil
 }
 
 func (c *concatenator) HTTPServerPortChanged(port int) error {
+	c.ctxt.Logf("http server port changed to %v", port)
 	c.state.Port = port
 	return nil
 }
@@ -89,33 +92,42 @@ func (c *concatenator) changed() error {
 	if localVal != nil && localVal != "" {
 		vals = append(vals, localVal.(string))
 	}
-	upstreamIds, err := c.ctxt.RelationIds("upstream")
-	if err != nil {
-		return errors.Wrap(err)
-	}
-	for _, id := range upstreamIds {
-		units, err := c.ctxt.RelationUnits(id)
-		if err != nil {
-			return errors.Wrap(err)
+	c.ctxt.Logf("changed, localVal %v", localVal)
+	c.ctxt.Logf("relation ids %#v", c.ctxt.RelationIds)
+	c.ctxt.Logf("relations: %#v", c.ctxt.Relations)
+	for _, id := range c.ctxt.RelationIds["upstream"] {
+		units := c.ctxt.Relations[id]
+		c.ctxt.Logf("found %d units with relation id %s", len(units), id)
+		// Use all the values sorted by the unit they come from, so the charm
+		// output is deterministic.
+		unitIds := make(unitIdSlice, 0, len(units))
+		for id := range units {
+			unitIds = append(unitIds, id)
 		}
-		for _, unit := range units {
-			val, err := c.ctxt.GetRelationUnit(id, unit, "val")
-			if err != nil {
-				return errors.Wrap(err)
-			}
-			vals = append(vals, val)
+		sort.Sort(unitIds)
+		for _, unitId := range unitIds {
+			c.ctxt.Logf("appending %q", units[unitId]["val"])
+			vals = append(vals, units[unitId]["val"])
 		}
 	}
 	c.state.Val = fmt.Sprintf("{%s}", strings.Join(vals, " "))
+	c.ctxt.Logf("after changed, val is %q", c.state.Val)
 	return nil
 }
+
+type unitIdSlice []hook.UnitId
+
+func (u unitIdSlice) Len() int           { return len(u) }
+func (u unitIdSlice) Swap(i, j int)      { u[i], u[j] = u[j], u[i] }
+func (u unitIdSlice) Less(i, j int) bool { return u[i] < u[j] }
 
 // finally runs after all the other hooks. We do this rather
 // than running the logic in the individual hooks, so that
 // we get a consolidated view of the current state of the unit,
 // and can avoid doing too much.
 func (c *concatenator) finally() error {
-	if *c.state == c.oldState {
+	c.ctxt.Logf("finally %s, state %#v; oldState %#v", c.ctxt.HookName, c.state, c.oldState)
+	if c.state == c.oldState {
 		return nil
 	}
 	if c.state.Port != c.oldState.Port {
@@ -129,10 +141,7 @@ func (c *concatenator) finally() error {
 	if err := c.setServiceVal(); err != nil {
 		return errors.Wrap(err)
 	}
-	ids, err := c.ctxt.RelationIds("downstream")
-	if err != nil {
-		return errors.Wrap(err)
-	}
+	ids := c.ctxt.RelationIds["downstream"]
 	c.ctxt.Logf("setting downstream relations %v to %s", ids, c.state.Val)
 	for _, id := range ids {
 		if err := c.ctxt.SetRelationWithId(id, "val", c.state.Val); err != nil {
@@ -143,6 +152,7 @@ func (c *concatenator) finally() error {
 }
 
 func (c *concatenator) restartService() error {
+	c.ctxt.Logf("restarting service")
 	if c.svc.Started() {
 		// Stop the service so that it can be restarted on a different
 		// port. In a more sophisticated program, this message the
@@ -169,6 +179,7 @@ func (c *concatenator) restartService() error {
 }
 
 func (c *concatenator) setServiceVal() error {
+	c.ctxt.Logf("setting service val to %s", c.state.Val)
 	return c.svc.Call("ConcatServer.SetVal", &SetValParams{
 		Val: c.state.Val,
 	}, empty)

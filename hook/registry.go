@@ -2,21 +2,13 @@ package hook
 
 import (
 	"fmt"
-	"net/rpc"
-	"os"
 	"path/filepath"
 	"reflect"
-	"sort"
 	"strings"
 
 	"gopkg.in/juju/charm.v4"
 	"launchpad.net/errgo/errors"
 )
-
-type hookFunc struct {
-	localStateName string
-	run            func() error
-}
 
 // ContextSetter is the type of a function that can
 // set the context for a hook. Usually this is
@@ -25,22 +17,77 @@ type ContextSetter func(ctxt *Context) error
 
 // Registry allows the registration of hook functions.
 type Registry struct {
-	localStateName string
-	hooks          map[string][]hookFunc
-	commands       map[string]func()
-	relations      map[string]charm.Relation
-	config         map[string]charm.Option
-	contexts       *[]ContextSetter
+	name string
+
+	// hasContext and hasCommand record whether the
+	// RegisterContext and/or RegisterCommand have
+	// been called for this context.
+	hasContext bool
+	hasCommand bool
+
+	// clones stores an entry for each cloned name.
+	clones map[string]bool
+
+	*sharedRegistry
+}
+
+// sharedRegistry holds registry values that
+// are shared across all clones of a Registry.
+type sharedRegistry struct {
+	hooks     map[string][]hookFunc
+	commands  map[string]func([]string)
+	relations map[string]charm.Relation
+	config    map[string]charm.Option
+	contexts  []ContextSetter
+	state     []localState
+}
+
+type hookFunc struct {
+	registryName string
+	run          func() error
+}
+
+// localState holds a registered persistent local state value.
+type localState struct {
+	registryName string
+	val          interface{}
 }
 
 // NewRegistry returns a new hook registry.
 func NewRegistry() *Registry {
 	return &Registry{
-		hooks:     make(map[string][]hookFunc),
-		commands:  make(map[string]func()),
-		relations: make(map[string]charm.Relation),
-		config:    make(map[string]charm.Option),
-		contexts:  new([]ContextSetter),
+		name:   "root",
+		clones: make(map[string]bool),
+		sharedRegistry: &sharedRegistry{
+			hooks:     make(map[string][]hookFunc),
+			commands:  make(map[string]func([]string)),
+			relations: make(map[string]charm.Relation),
+			config:    make(map[string]charm.Option),
+		},
+	}
+}
+
+// Clone returns a sub-registry of r with the given name. This
+// will use a separate name space for local state and for commands.
+// This should be used when passing a registry to an external
+// package Register function.
+//
+// This method may not be called more than once on the same registry
+// with the same name. The name must be filesystem safe, and must not
+// contain a '.' character or be blank. If either of these two
+// conditions occur, Clone will panic.
+func (r *Registry) Clone(name string) *Registry {
+	if name == "" || strings.Contains(name, ".") || strings.ContainsRune(name, filepath.Separator) {
+		panic(errors.Newf("invalid registry name %q", name))
+	}
+	if r.clones[name] {
+		panic(errors.Newf("registry name %q registered twice", name))
+	}
+	r.clones[name] = true
+	return &Registry{
+		name:           r.name + "." + name,
+		clones:         make(map[string]bool),
+		sharedRegistry: r.sharedRegistry,
 	}
 }
 
@@ -59,36 +106,58 @@ func (r *Registry) RegisterHook(name string, f func() error) {
 	//	panic(fmt.Errorf("invalid hook name %q", name))
 	//}
 	r.hooks[name] = append(r.hooks[name], hookFunc{
-		run:            f,
-		localStateName: r.localStateName,
+		run:          f,
+		registryName: r.name,
 	})
 }
 
 // RegisterContext registers a function that will be called
 // to set up a context before any hook function execution.
-func (r *Registry) RegisterContext(setter ContextSetter) {
-	*r.contexts = append(*r.contexts, func(ctxt *Context) error {
-		return setter(ctxt.withLocalStateName(r.localStateName))
+//
+// If state is non-nil, it should hold a pointer to a value
+// that will be used to hold persistent state associated with the
+// function. When a hook runs, before the setter function is
+// called, any previously saved state is loaded into the value.
+// When all hooks have completed, the state is saved, making
+// it persistent. The data is saved using JSON.Marshal.
+//
+// This function may not be called more than once for a given Registry;
+// it will panic if it is.
+func (r *Registry) RegisterContext(setter ContextSetter, state interface{}) {
+	if r.hasContext {
+		// TODO if this proves to be a problem, we could save
+		// some of the stack from the original invocation, so
+		// that we can produce a more useful error message here.
+		panic("RegisterContext called more than once")
+	}
+	r.hasContext = true
+	r.contexts = append(r.contexts, func(ctxt *Context) error {
+		return setter(ctxt.withRegistryName(r.name))
+	})
+	if state == nil {
+		return
+	}
+	if reflect.ValueOf(state).Kind() != reflect.Ptr {
+		panic(errors.Newf("state value is not pointer but type %T", state))
+	}
+	r.state = append(r.state, localState{
+		registryName: r.name,
+		val:          state,
 	})
 }
 
 // RegisterCommand registers the given function to be called
 // when the hook is invoked with a first argument of "cmd".
-// The name is relative to the registry's state namespace.
-// It will panic if the same name is registered more than
-// once in the same Registry.
+// It will panic if it is called more than once in the same Registry.
 //
-// When the function is called, os.Args will be set up as
-// if the function is main - the "cmd-" command selector
-// will be removed.
-func (r *Registry) RegisterCommand(name string, f func()) {
-	// TODO check that name is vaid (non-empty, no slashes)
-
-	name = filepath.Join(r.localStateName, name)
-	if r.commands[name] != nil {
-		panic(errors.Newf("command %q is already registered", name))
+// The function will be called with any extra arguments passed on
+// the command line, without the command name itself.
+func (r *Registry) RegisterCommand(f func(args []string)) {
+	if r.hasCommand {
+		panic(errors.Newf("command registered twice on registry %s", r.name))
 	}
-	r.commands[name] = f
+	r.hasCommand = true
+	r.commands[r.name] = f
 }
 
 // RegisterRelation registers a relation to be included in the charm's
@@ -128,30 +197,12 @@ func (r *Registry) RegisterRelation(rel charm.Relation) {
 // same name, all of the details must also match.
 func (r *Registry) RegisterConfig(name string, opt charm.Option) {
 	old, ok := r.config[name]
-	if ok {
-		if old != opt {
-			panic(errors.Newf("configuration option %q is already registered with different details (%#v)", name, old))
-		}
+	if !ok {
+		r.config[name] = opt
 		return
 	}
-	r.config[name] = opt
-}
-
-// NewRegistry returns a sub-registry of r. Local state
-// stored by hooks registered with that will be stored relative to the
-// given name within r; likewise new registries created by NewRegistry
-// on it will store local state relatively to r.
-//
-// This enables hierarchical local storage for charm hooks.
-func (r *Registry) NewRegistry(localStateName string) *Registry {
-	// TODO check name is valid
-	return &Registry{
-		localStateName: filepath.Join(r.localStateName, localStateName),
-		hooks:          r.hooks,
-		commands:       r.commands,
-		relations:      r.relations,
-		config:         r.config,
-		contexts:       r.contexts,
+	if old != opt {
+		panic(errors.Newf("configuration option %q is already registered with different details (%#v)", name, old))
 	}
 }
 
@@ -177,181 +228,4 @@ func (r *Registry) RegisteredRelations() map[string]charm.Relation {
 // that have been registered with RegisterConfig.
 func (r *Registry) RegisteredConfig() map[string]charm.Option {
 	return r.config
-}
-
-const (
-	envUUID          = "JUJU_ENV_UUID"
-	envUnitName      = "JUJU_UNIT_NAME"
-	envCharmDir      = "CHARM_DIR"
-	envJujuContextId = "JUJU_CONTEXT_ID"
-	envRelationName  = "JUJU_RELATION"
-	envRelationId    = "JUJU_RELATION_ID"
-	envRemoteUnit    = "JUJU_REMOTE_UNIT"
-	envSocketPath    = "JUJU_AGENT_SOCKET"
-)
-
-var mustEnvVars = []string{
-	envUUID,
-	envUnitName,
-	envCharmDir,
-	envJujuContextId,
-	envSocketPath,
-}
-
-var relationEnvVars = []string{
-	envRelationName,
-	envRelationId,
-	envRemoteUnit,
-}
-
-func usageError(r *Registry) error {
-	var allowed []string
-	for cmd := range r.commands {
-		allowed = append(allowed, "cmd-"+cmd+" [arg...]")
-	}
-	for hook := range r.hooks {
-		allowed = append(allowed, hook)
-	}
-	sort.Strings(allowed[0:len(r.commands)])
-	sort.Strings(allowed[len(r.commands):])
-	return errors.Newf("usage: runhook %s", strings.Join(allowed, "\n\t| runhook "))
-}
-
-// Main creates a new context from the environment and invokes the
-// appropriate command or hook functions from the given
-// registry or sub-registries of it.
-//
-// This function is designed to be called by gocharm
-// generated code only.
-func Main(r *Registry) (err error) {
-	if len(os.Args) < 2 {
-		return usageError(r)
-	}
-	if strings.HasPrefix(os.Args[1], "cmd-") {
-		cmdName := strings.TrimPrefix(os.Args[1], "cmd-")
-		cmd := r.commands[cmdName]
-		if cmd == nil {
-			return usageError(r)
-		}
-		// Elide the command name argument.
-		os.Args = append(os.Args[:1], os.Args[2:]...)
-		cmd()
-		return nil
-	}
-	ctxt, err := newContext()
-	if err != nil {
-		return errors.Wrap(err)
-	}
-	defer ctxt.close()
-
-	// Notify everyone about the context.
-	for _, ctxtf := range *r.contexts {
-		if err := ctxtf(ctxt); err != nil {
-			return errors.Wrapf(err, "cannot set context")
-		}
-	}
-	defer func() {
-		// All the hooks have now run; save the state.
-		if saveErr := ctxt.saveState(); saveErr != nil {
-			if err == nil {
-				err = errors.Wrapf(saveErr, "cannot save local state")
-			} else {
-				ctxt.Logf("cannot save local state: %v", saveErr)
-			}
-		}
-	}()
-
-	// The wildcard hook always runs after any other
-	// registered hooks.
-	hookFuncs := r.hooks[ctxt.HookName]
-
-	if len(hookFuncs) == 0 {
-		ctxt.Logf("hook %q not registered", ctxt.HookName)
-		return usageError(r)
-	}
-	hookFuncs = append(hookFuncs, r.hooks["*"]...)
-	for _, f := range hookFuncs {
-		if err := f.run(); err != nil {
-			// TODO better error context here, perhaps
-			// including local state name, hook name, etc.
-			return errors.Wrap(err)
-		}
-	}
-	return nil
-}
-
-func nop() error {
-	return nil
-}
-
-// RegisterMainHooks registers any hooks that
-// are needed by any charm. It should be
-// called after any other Register functions.
-//
-// This function is designed to be called by gocharm
-// generated code only.
-func RegisterMainHooks(r *Registry) {
-	// We always need install and start hooks.
-	r.RegisterHook("install", nop)
-	r.RegisterHook("start", nop)
-	var ctxt *Context
-	r.RegisterContext(func(hctxt *Context) error {
-		ctxt = hctxt
-		return nil
-	})
-	// Ensure that we have a stop hook and that
-	// it is called after every other hook, including
-	// wildcard hooks.
-	r.RegisterHook("stop", nop)
-	r.RegisterHook("*", func() error {
-		// We've shut down, so clean up all our local state.
-		if err := os.RemoveAll(ctxt.StateDir()); err != nil {
-			return errors.Wrapf(err, "cannot remove local state")
-		}
-		return nil
-	})
-}
-
-// newContext creates a hook context from the current environment.
-func newContext() (*Context, error) {
-	vars := mustEnvVars
-	if os.Getenv(envRelationName) != "" {
-		vars = append(vars, relationEnvVars...)
-	}
-	for _, v := range vars {
-		if os.Getenv(v) == "" {
-			return nil, errors.Newf("required environment variable %q not set", v)
-		}
-	}
-	if len(os.Args) != 2 {
-		return nil, errors.New("one argument required")
-	}
-	hookName := os.Args[1]
-	internalCtxt := &internalContext{
-		info: ContextInfo{
-			UUID:         os.Getenv(envUUID),
-			Unit:         os.Getenv(envUnitName),
-			CharmDir:     os.Getenv(envCharmDir),
-			RelationName: os.Getenv(envRelationName),
-			RelationId:   os.Getenv(envRelationId),
-			RemoteUnit:   os.Getenv(envRemoteUnit),
-			HookName:     hookName,
-		},
-		jujucContextId: os.Getenv(envJujuContextId),
-		localState:     make(map[string]reflect.Value),
-	}
-	client, err := rpc.Dial("unix", os.Getenv(envSocketPath))
-	if err != nil {
-		return nil, errors.Newf("cannot dial uniter: %v", err)
-	}
-	internalCtxt.jujucClient = client
-	return &Context{
-		ContextInfo:     &internalCtxt.info,
-		internalContext: internalCtxt,
-	}, nil
-}
-
-// Close closes the context's connection to the unit agent.
-func (ctxt *internalContext) close() error {
-	return ctxt.jujucClient.Close()
 }

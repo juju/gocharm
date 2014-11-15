@@ -8,164 +8,137 @@ package hook
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
-	"net/rpc"
-	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 
-	"github.com/juju/juju/worker/uniter/context/jujuc"
 	"github.com/juju/names"
-	"github.com/juju/utils/exec"
 	"launchpad.net/errgo/errors"
 )
 
-// TODO make it easy to derive one context from another one (changing
-// the localStateName) while keeping the underlying context.
-// Perhaps refcount
+// RelationId is the type of the id of a relation. A relation with
+// a given id corresponds to a relation as created by the
+// juju add-relation command.
+type RelationId string
 
-type internalContext struct {
-	info           ContextInfo
-	jujucContextId string
-	jujucClient    *rpc.Client
+// UnitId is the type of the id of a unit.
+type UnitId string
 
-	// localState maps from file path to the data to be
-	// stored there.
-	localState map[string]reflect.Value
+func (id UnitId) Tag() names.UnitTag {
+	return names.NewUnitTag(string(id))
 }
 
-// ContextInfo provides information about the
-// context. It should be treated as read-only.
-type ContextInfo struct {
-	// Valid for all hooks
-	UUID     string
-	Unit     string
+// Context provides information about the
+// hook context. It should be treated as read-only.
+type Context struct {
+	// registryName holds the name of the registry that
+	// the context is associated with.
+	registryName string
+
+	// Fields valid for all hooks
+
+	// UUID holds the globally unique environment id.
+	UUID string
+
+	// Unit holds the name of the current charm's unit.
+	Unit UnitId
+
+	// CharmDir holds the directory that the charm is running from.
 	CharmDir string
+
+	// HookName holds the name of the currently running hook.
 	HookName string
 
-	// Valid for relation-related hooks.
+	// Relations holds all the relation data available to the charm.
+	// For each relation id, it holds all the units that have joined
+	// that relation, and within that, all the relation settings for
+	// each of those units.
+	//
+	// This does not include settings for the charm unit itself.
+	Relations map[RelationId]map[UnitId]map[string]string
+
+	// RelationIds holds the relation ids for each relation declared
+	// in the charm. For example, if the charm has a relation named
+	// "webserver" in its metadata.yaml, the current ids for that
+	// relation (i.e. all the relations have have been made by the
+	// user) will be in RelationIds["webserver"].
+	RelationIds map[string][]RelationId
+
+	// Fields valid for relation-related hooks only.
+
+	// RelationName holds the name of the relation that
+	// the current relation hook is running for. It will be
+	// one of the relation names declared in the metadata.yaml file.
 	RelationName string
-	RelationId   string
-	RemoteUnit   string
+
+	// RelationId holds the id of the relation that
+	// the current relation hook is running for. See RelationIds above.
+	RelationId RelationId
+
+	// RemoteUnit holds the id of the unit that the current
+	// relation hook is running for. This will be empty
+	// for a relation-broken hook.
+	RemoteUnit UnitId
+
+	// Runner is used to run hook tools by methods on the context.
+	Runner ToolRunner
+
+	// RunCommandName holds the name of the command, when
+	// the runhook executable is run as a command.
+	// If this is set, none of the other fields will be valid.
+	// This will never be set when the context is passed
+	// into any hook function.
+	RunCommandName string
+
+	// RunCommandArgs holds any arguments that were passed to
+	// the above command.
+	RunCommandArgs []string
 }
 
-// Context provides the context for a running Juju hook.
-type Context struct {
-	*ContextInfo
-	localStateName string
-	*internalContext
-}
-
-// withLocalStateName returns a Context that's the same as
-// ctxt but uses the given local state.
-func (ctxt *Context) withLocalStateName(localStateName string) *Context {
-	return &Context{
-		localStateName:  localStateName,
-		ContextInfo:     &ctxt.info,
-		internalContext: ctxt.internalContext,
+// Relation holds the current relation settings for the unit
+// that triggered the current hook. It will panic if
+// the current hook is not a relation-related hook.
+func (ctxt *Context) Relation() map[string]string {
+	if ctxt.RemoteUnit == "" || ctxt.RelationId == "" {
+		panic(fmt.Errorf("Relation called in non-relation hook %s", ctxt.HookName))
 	}
+	return ctxt.Relations[ctxt.RelationId][ctxt.RemoteUnit]
+}
+
+// Close closes ctxt.Runner, if it is not nil.
+func (ctxt *Context) Close() error {
+	if ctxt.Runner != nil {
+		return ctxt.Runner.Close()
+	}
+	return nil
+}
+
+// withRegistryName returns a Context that's the same as
+// ctxt but is associated with the registry with the given name.
+func (ctxt *Context) withRegistryName(registryName string) *Context {
+	ctxt1 := *ctxt
+	ctxt1.registryName = registryName
+	return &ctxt1
 }
 
 // hookStateDir is where hook local state will be stored.
+// TODO would /etc/init be a better place for this?
 var hookStateDir = "/var/lib/juju-localstate"
 
 // StateDir returns the path to the directory where local state for the
-// given context will be stored. The directory is not guaranteed to
-// exist.
+// given context will be stored. The directory is relative to the
+// registry through which the context was created. It is not guaranteed
+// to exist.
 func (ctxt *Context) StateDir() string {
-	return filepath.Join(hookStateDir, ctxt.UUID+"-"+ctxt.UnitTag(), ctxt.localStateName)
-}
-
-// LocalState reads charm local state for the given name (which should
-// be valid to use as a file name) and uses it to fill out the value
-// pointed to by ptr, which should be a pointer to a pointer to a type
-// that's marshallable and unmarshallable as JSON.
-//
-// When the hook has completed, the value will be saved back to
-// the same place, making it persistent.
-//
-// The first time LocalState is called in a hook, the element pointed to
-// by ptr is allocated with new, and then filled by JSON unmarshalling,
-// or left zero if there's no existing state. When LocalState is
-// called again, the element pointed to by ptr will be set to
-// the previously allocated value.
-//
-// For example:
-//	func someHook(ctxt *hook.Context) error {
-//		type myState struct {
-//			Called int
-//		}
-//		var state *myState
-//		if err := ctxt.LocalState(&state, "some-hook"); err != nil {
-//			return err
-//		}
-//		if !state.Called {
-//			ctxt.Logf("someHook has never been called before")
-//		}
-//		state.Called = true
-//	}
-//
-func (ctxt *Context) LocalState(name string, ptr interface{}) error {
-	ptrv := reflect.ValueOf(ptr)
-	ptrt := ptrv.Type()
-	if ptrt.Kind() != reflect.Ptr || ptrt.Elem().Kind() != reflect.Ptr {
-		panic(errors.Newf("LocalState requires pointer-to-pointer, not %s", ptrt))
-	}
-	// TODO check that name is valid (no slash, no .json extension)
-	path := filepath.Join(ctxt.StateDir(), name) + ".json"
-	if oldv, ok := ctxt.localState[path]; ok {
-		// There's already some previous state; set *ptr = oldv
-		if ptrt.Elem() != oldv.Type() {
-			panic(errors.Newf("LocalState called with inconsistent type %s (expected %s)", ptrt.Elem(), oldv.Type()))
-		}
-		ptrv.Elem().Set(oldv)
-		return nil
-	}
-	v := reflect.New(ptrt.Elem().Elem())
-	data, err := ioutil.ReadFile(path)
-	if err == nil {
-		if err := json.Unmarshal(data, v.Interface()); err != nil {
-			return errors.Wrap(err)
-		}
-	} else if !os.IsNotExist(err) {
-		return errors.Wrap(err)
-	}
-	ctxt.localState[path] = v
-	ptrv.Elem().Set(v)
-	return nil
-}
-
-// saveState saves the state of all the values that have been created
-// by LocalState.
-func (ctxt *Context) saveState() error {
-	made := make(map[string]bool)
-	for path, val := range ctxt.localState {
-		if dir := filepath.Dir(path); !made[dir] {
-			if err := os.MkdirAll(dir, 0700); err != nil {
-				return errors.Wrap(err)
-			}
-			made[dir] = true
-		}
-		data, err := json.Marshal(val.Interface())
-		if err != nil {
-			return errors.Wrapf(err, "could not marshal state %q", path)
-		}
-		// TODO optimise so this so it only writes if the data has actually changed.
-		if err := ioutil.WriteFile(path, data, 0600); err != nil {
-			return errors.Wrapf(err, "could not save state to %q", path)
-		}
-	}
-	return nil
+	return filepath.Join(hookStateDir, ctxt.UUID+"-"+ctxt.UnitTag(), ctxt.registryName)
 }
 
 // CommandName returns a value that can be used to make runhook run the
-// given command when passed as its first argument. The command name is
-// relative to the registry from which ctxt was created.
+// given command when passed as its first argument. The command run
+// will be the command registered with RegisterCommand on the registry
+// this context is derived from.
 // TODO better explanation and an example.
-func (ctxt *Context) CommandName(name string) string {
-	// TODO panic if name is empty?
-	return filepath.Join("cmd-" + filepath.Join(ctxt.localStateName, name))
+func (ctxt *Context) CommandName() string {
+	return "cmd-" + ctxt.registryName
 }
 
 func (ctxt *Context) IsRelationHook() bool {
@@ -175,22 +148,22 @@ func (ctxt *Context) IsRelationHook() bool {
 // UnitTag returns the tag of the current unit, useful for
 // using as a file name.
 func (ctxt *Context) UnitTag() string {
-	return names.NewUnitTag(ctxt.Unit).String()
+	return names.NewUnitTag(string(ctxt.Unit)).String()
 }
 
 func (ctxt *Context) OpenPort(proto string, port int) error {
-	_, err := ctxt.run("open-port", fmt.Sprintf("%d/%s", port, proto))
+	_, err := ctxt.Runner.Run("open-port", fmt.Sprintf("%d/%s", port, proto))
 	return errors.Wrap(err)
 }
 
 func (ctxt *Context) ClosePort(proto string, port int) error {
-	_, err := ctxt.run("close-port", fmt.Sprintf("%d/%s", port, proto))
+	_, err := ctxt.Runner.Run("close-port", fmt.Sprintf("%d/%s", port, proto))
 	return errors.Wrap(err)
 }
 
 // PublicAddress returns the public address of the local unit.
 func (ctxt *Context) PublicAddress() (string, error) {
-	out, err := ctxt.run("unit-get", "public-address")
+	out, err := ctxt.Runner.Run("unit-get", "public-address")
 	if err != nil {
 		return "", errors.Wrap(err)
 	}
@@ -199,7 +172,7 @@ func (ctxt *Context) PublicAddress() (string, error) {
 
 // PrivateAddress returns the private address of the local unit.
 func (ctxt *Context) PrivateAddress() (string, error) {
-	out, err := ctxt.run("unit-get", "private-address")
+	out, err := ctxt.Runner.Run("unit-get", "private-address")
 	if err != nil {
 		return "", errors.Wrap(err)
 	}
@@ -208,89 +181,37 @@ func (ctxt *Context) PrivateAddress() (string, error) {
 
 // Log logs a message through the juju logging facility.
 func (ctxt *Context) Logf(f string, a ...interface{}) error {
-	_, err := ctxt.run("juju-log", fmt.Sprintf(f, a...))
+	_, err := ctxt.Runner.Run("juju-log", fmt.Sprintf(f, a...))
 	return errors.Wrap(err)
 }
 
-// GetRelation returns the value with the given key from the
-// relation and unit that triggered the hook execution.
-// It is equivalent to GetRelationUnit(RelationId, RemoteUnit, key).
-func (ctxt *Context) GetRelation(key string) (string, error) {
-	r, err := ctxt.GetRelationUnit(ctxt.RelationId, ctxt.RemoteUnit, key)
-	if err != nil {
-		return "", errors.Wrap(err)
-	}
-	return r, nil
-}
-
-// GetRelationUnit returns the value with the given key
-// from the given unit associated with the relation with the
-// given id.
-func (ctxt *Context) GetRelationUnit(relationId, unit, key string) (string, error) {
-	var val string
-	if err := ctxt.runJson(&val, "relation-get", "--format", "json", "-r", relationId, "--", key, unit); err != nil {
-		return "", errors.Wrap(err)
-	}
-	return val, nil
-}
-
-// GetAllRelation returns all the settings for the relation
-// and unit that triggered the hook execution.
-// It is equivalent to GetAllRelationUnit(RelationId, RemoteUnit).
-func (ctxt *Context) GetAllRelation() (map[string]string, error) {
-	m, err := ctxt.GetAllRelationUnit(ctxt.RelationId, ctxt.RemoteUnit)
-	if err != nil {
-		return nil, errors.Wrap(err)
-	}
-	return m, nil
-}
-
-// GetAllRelationUnit returns all the settings from the given unit associated
+// getAllRelationUnit returns all the settings from the given unit associated
 // with the relation with the given id.
-func (ctxt *Context) GetAllRelationUnit(relationId, unit string) (map[string]string, error) {
+func (ctxt *Context) getAllRelationUnit(relationId RelationId, unit UnitId) (map[string]string, error) {
 	var val map[string]string
-	if err := ctxt.runJson(&val, "relation-get", "-r", relationId, "--format", "json", "--", "-", unit); err != nil {
+	if err := ctxt.runJson(&val, "relation-get", "-r", string(relationId), "--format", "json", "--", "-", string(unit)); err != nil {
 		return nil, errors.Wrap(err)
 	}
 	return val, nil
 }
 
-// RelationIds returns all the relation ids associated
+// relationIds returns all the relation ids associated
 // with the relation with the given name.
-func (ctxt *Context) RelationIds(relationName string) ([]string, error) {
-	var val []string
+func (ctxt *Context) relationIds(relationName string) ([]RelationId, error) {
+	var val []RelationId
 	if err := ctxt.runJson(&val, "relation-ids", "--format", "json", "--", relationName); err != nil {
 		return nil, errors.Wrap(err)
 	}
 	return val, nil
 }
 
-// RelationUnits returns all the units associated with the given relation id.
-func (ctxt *Context) RelationUnits(relationId string) ([]string, error) {
-	var val []string
-	if err := ctxt.runJson(&val, "relation-list", "--format", "json", "-r", relationId); err != nil {
+// relationUnits returns all the units associated with the given relation id.
+func (ctxt *Context) relationUnits(relationId RelationId) ([]UnitId, error) {
+	var val []UnitId
+	if err := ctxt.runJson(&val, "relation-list", "--format", "json", "-r", string(relationId)); err != nil {
 		return nil, errors.Wrap(err)
 	}
 	return val, nil
-}
-
-// AllRelationUnits returns a map from all the relation ids
-// for the relation with the given name to all the
-// units with that name.
-func (ctxt *Context) AllRelationUnits(relationName string) (map[string][]string, error) {
-	allUnits := make(map[string][]string)
-	ids, err := ctxt.RelationIds(relationName)
-	if err != nil {
-		return nil, errors.Newf("cannot get relation ids: %v", err)
-	}
-	for _, id := range ids {
-		units, err := ctxt.RelationUnits(id)
-		if err != nil {
-			return nil, errors.Newf("cannot get relation units for id %q: %v", id, err)
-		}
-		allUnits[id] = units
-	}
-	return allUnits, nil
 }
 
 // SetRelation sets the given key-value pairs on the current relation instance.
@@ -301,7 +222,7 @@ func (ctxt *Context) SetRelation(keyvals ...string) error {
 
 // SetRelationWithId sets the given key-value pairs
 // on the relation with the given id.
-func (ctxt *Context) SetRelationWithId(relationId string, keyvals ...string) error {
+func (ctxt *Context) SetRelationWithId(relationId RelationId, keyvals ...string) error {
 	if len(keyvals)%2 != 0 {
 		return errors.Newf("invalid key/value count")
 	}
@@ -309,11 +230,11 @@ func (ctxt *Context) SetRelationWithId(relationId string, keyvals ...string) err
 		return nil
 	}
 	args := make([]string, 0, 3+len(keyvals)/2)
-	args = append(args, "-r", relationId, "--")
+	args = append(args, "-r", string(relationId), "--")
 	for i := 0; i < len(keyvals); i += 2 {
 		args = append(args, fmt.Sprintf("%s=%s", keyvals[i], keyvals[i+1]))
 	}
-	_, err := ctxt.run("relation-set", args...)
+	_, err := ctxt.Runner.Run("relation-set", args...)
 	return errors.Wrap(err)
 }
 
@@ -335,33 +256,8 @@ func (ctxt *Context) GetAllConfig() (map[string]interface{}, error) {
 	return val, nil
 }
 
-func (ctxt *Context) run(cmd string, args ...string) (stdout []byte, err error) {
-	req := jujuc.Request{
-		ContextId: ctxt.jujucContextId,
-		// We will never use a command that uses a path name,
-		// but jujuc checks for an absolute path.
-		Dir:         "/",
-		CommandName: cmd,
-		Args:        args,
-	}
-	// log.Printf("run req %#v", req)
-	var resp exec.ExecResponse
-	err = ctxt.jujucClient.Call("Jujuc.Main", req, &resp)
-	if err != nil {
-		return nil, errors.Newf("cannot call jujuc.Main: %v", err)
-	}
-	if resp.Code == 0 {
-		return resp.Stdout, nil
-	}
-	errText := strings.TrimSpace(string(resp.Stderr))
-	if strings.HasPrefix(errText, "error: ") {
-		errText = errText[len("error: "):]
-	}
-	return nil, errors.New(errText)
-}
-
 func (ctxt *Context) runJson(dst interface{}, cmd string, args ...string) error {
-	out, err := ctxt.run(cmd, args...)
+	out, err := ctxt.Runner.Run(cmd, args...)
 	if err != nil {
 		return errors.Wrap(err)
 	}

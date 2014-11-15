@@ -10,7 +10,8 @@ import (
 	"launchpad.net/errgo/errors"
 )
 
-func runServer(serviceRPC interface{}) {
+func runServer(serviceRPC interface{}, args []string) {
+	os.Args = append([]string{"runhook"}, args...)
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "usage: service <socketpath>\n")
 		flag.PrintDefaults()
