@@ -23,7 +23,7 @@ type Requirer struct {
 	ctxt         *hook.Context
 	relationName string
 	intf         Interface
-	state        *localState
+	state        localState
 }
 
 type localState struct {
@@ -37,7 +37,7 @@ type localState struct {
 func (req *Requirer) Register(r *hook.Registry, relationName string, intf Interface) {
 	req.relationName = relationName
 	req.intf = intf
-	r.RegisterContext(req.setContext)
+	r.RegisterContext(req.setContext, &req.state)
 	r.RegisterRelation(charm.Relation{
 		Name:      relationName,
 		Interface: "mongodb",
@@ -50,9 +50,6 @@ func (req *Requirer) Register(r *hook.Registry, relationName string, intf Interf
 
 func (req *Requirer) setContext(ctxt *hook.Context) error {
 	req.ctxt = ctxt
-	if err := ctxt.LocalState("state", &req.state); err != nil {
-		return errors.Wrap(err)
-	}
 	return nil
 }
 
@@ -76,28 +73,17 @@ func (req *Requirer) Addresses() []string {
 }
 
 func (req *Requirer) currentAddresses() ([]string, error) {
-	ids, err := req.ctxt.RelationIds(req.relationName)
-	if err != nil {
-		return nil, errors.Wrapf(err, "cannot get relation ids")
-	}
+	ids := req.ctxt.RelationIds[req.relationName]
 	if len(ids) == 0 {
 		return nil, nil
 	}
 	if len(ids) > 1 {
-		req.ctxt.Logf("more than one provider for the mongodb relation")
+		req.ctxt.Logf("more than one provider for the %s relation", req.relationName)
 		return nil, nil
 	}
 	id := ids[0]
-	units, err := req.ctxt.RelationUnits(id)
-	if err != nil {
-		return nil, errors.Wrapf(err, "cannot get relation units for relation %s", id)
-	}
 	var addrs []string
-	for _, unit := range units {
-		vals, err := req.ctxt.GetAllRelationUnit(id, unit)
-		if err != nil {
-			return nil, errors.Wrapf(err, "cannot get relation settings for %s", unit)
-		}
+	for _, vals := range req.ctxt.Relations[id] {
 		host := vals["hostname"]
 		if host == "" {
 			continue
@@ -105,6 +91,7 @@ func (req *Requirer) currentAddresses() ([]string, error) {
 		port := vals["port"]
 		if port == "" {
 			req.ctxt.Logf("mongo host %q found with no port", host)
+			continue
 		}
 		addrs = append(addrs, net.JoinHostPort(host, port))
 	}

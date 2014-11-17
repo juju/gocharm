@@ -34,7 +34,7 @@ type providerState struct {
 
 // Provider represents the provider of an http relation.
 type Provider struct {
-	state        *providerState
+	state        providerState
 	ctxt         *hook.Context
 	relationName string
 	oldState     providerState
@@ -72,17 +72,14 @@ func (p *Provider) Register(r *hook.Registry, relationName string, changed PortC
 	})
 	r.RegisterHook("relation-"+relationName+"-joined", p.relationJoined)
 	r.RegisterHook("config-changed", p.configChanged)
-	r.RegisterContext(p.setContext)
+	r.RegisterContext(p.setContext, &p.state)
 	p.relationName = relationName
 	p.changed = changed
 }
 
 func (p *Provider) setContext(ctxt *hook.Context) error {
-	if err := ctxt.LocalState("server", &p.state); err != nil {
-		return errors.Wrap(err)
-	}
 	p.ctxt = ctxt
-	p.oldState = *p.state
+	p.oldState = p.state
 	return nil
 }
 
@@ -135,11 +132,7 @@ func (p *Provider) configChanged() error {
 		return errors.Wrap(err)
 	}
 	// Set the current address in all requirers.
-	ids, err := p.ctxt.RelationIds(p.relationName)
-	if err != nil {
-		return errors.Wrap(err)
-	}
-	for _, id := range ids {
+	for _, id := range p.ctxt.RelationIds[p.relationName] {
 		if err := p.setRelationAddress(id, addr); err != nil {
 			return errors.Wrap(err)
 		}
@@ -161,7 +154,7 @@ func (p *Provider) relationJoined() error {
 	return nil
 }
 
-func (p *Provider) setRelationAddress(relId string, addr string) error {
+func (p *Provider) setRelationAddress(relId hook.RelationId, addr string) error {
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		return errors.Wrapf(err, "cannot split host/port")

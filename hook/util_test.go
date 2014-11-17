@@ -16,6 +16,8 @@ import (
 	"github.com/juju/utils/set"
 	. "gopkg.in/check.v1"
 	"gopkg.in/juju/charm.v4"
+
+	"github.com/juju/gocharm/hook"
 )
 
 func TestPackage(t *testing.T) { TestingT(t) }
@@ -52,6 +54,37 @@ func GetHookServerContext(c *C, relid int, remote string) *ServerContext {
 		remote: remote,
 		rels:   rels,
 	}
+}
+
+var allRelationIds = map[string][]hook.RelationId{
+	"peer0": {"peer0:0"},
+	"peer1": {"peer1:1"},
+}
+
+var allRelationValues = map[hook.RelationId]map[hook.UnitId]map[string]string{
+	"peer0:0": {
+		"peer0/0": {"private-address": "peer0-0.example.com"},
+		"peer0/1": {"private-address": "peer0-1.example.com"},
+	},
+	"peer1:1": {
+		"peer1/0": {"private-address": "peer1-0.example.com"},
+		"peer1/1": {"private-address": "peer1-1.example.com"},
+	},
+}
+
+func registerDefaultRelations(r *hook.Registry) {
+	r.RegisterRelation(charm.Relation{
+		Name:      "peer0",
+		Role:      charm.RoleRequirer,
+		Interface: "peer0interface",
+		Scope:     charm.ScopeGlobal,
+	})
+	r.RegisterRelation(charm.Relation{
+		Name:      "peer1",
+		Role:      charm.RoleRequirer,
+		Interface: "peer1interface",
+		Scope:     charm.ScopeGlobal,
+	})
 }
 
 type ServerContext struct {

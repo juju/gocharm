@@ -2,7 +2,6 @@ package hook_test
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 
@@ -101,26 +100,27 @@ func (s *HookSuite) setenv(key, val string) {
 }
 
 func (s *HookSuite) newContext(c *gc.C, args ...string) *hook.Context {
+	r := hook.NewRegistry()
+	registerDefaultRelations(r)
+
 	os.Args = append([]string{"runhook"}, args...)
-	ctxt, err := hook.NewContext()
+	ctxt, _, err := hook.NewContextFromEnvironment(r)
 	c.Assert(err, gc.IsNil)
 	return ctxt
 }
 
 func (s *HookSuite) TestSimple(c *gc.C) {
 	s.StartServer(c, 0, "peer0/0")
-	os.Args = []string{"runhook", "peer-relation-changed"}
-	ctxt, err := hook.NewContext()
-	c.Assert(err, gc.IsNil)
+	ctxt := s.newContext(c, "peer-relation-changed")
 	defer ctxt.Close()
 
 	c.Check(ctxt.HookName, gc.Equals, "peer-relation-changed")
 	c.Check(ctxt.UUID, gc.Equals, "fff.fff.fff")
-	c.Check(ctxt.Unit, gc.Equals, "local/55")
+	c.Check(ctxt.Unit, gc.Equals, hook.UnitId("local/55"))
 	c.Check(ctxt.CharmDir, gc.Matches, ".*/charmdir")
 	c.Check(ctxt.RelationName, gc.Equals, "peer0")
-	c.Check(ctxt.RelationId, gc.Equals, "peer0:0")
-	c.Check(ctxt.RemoteUnit, gc.Equals, "peer0/0")
+	c.Check(ctxt.RelationId, gc.Equals, hook.RelationId("peer0:0"))
+	c.Check(ctxt.RemoteUnit, gc.Equals, hook.UnitId("peer0/0"))
 
 	// should really check false but annoying to do
 	// and too trivial to be worth it.
@@ -143,86 +143,67 @@ func (s *HookSuite) TestSimple(c *gc.C) {
 
 func (s *HookSuite) TestLocalState(c *gc.C) {
 	s.StartServer(c, 0, "peer0/0")
-	ctxt := s.newContext(c, "peer-relation-changed")
-	defer ctxt.Close()
 
 	type fooState struct {
 		Foo int
 		Bar string
 	}
-	var state *fooState
-	err := ctxt.LocalState("foo", &state)
-	c.Assert(err, gc.IsNil)
-	c.Assert(state, gc.DeepEquals, &fooState{})
-
-	var state1 *fooState
-	err = ctxt.LocalState("foo", &state1)
-	c.Assert(err, gc.IsNil)
-	c.Assert(state1, gc.Equals, state)
-
-	state.Foo = 88
-	state.Bar = "xxx"
-	err = ctxt.SaveState()
-	c.Assert(err, gc.IsNil)
-
-	ctxt = s.newContext(c, "peer-relation-changed")
-	defer ctxt.Close()
-
-	var newState *fooState
-	err = ctxt.LocalState("foo", &newState)
-	c.Assert(err, gc.IsNil)
-	c.Assert(newState, gc.DeepEquals, state)
-
-	newState.Foo = 88
-	err = ctxt.SaveState()
-	c.Assert(err, gc.IsNil)
-
-	data, err := ioutil.ReadFile(filepath.Join(ctxt.StateDir(), "foo.json"))
-	c.Assert(err, gc.IsNil)
-	c.Assert(string(data), gc.Equals, `{"Foo":88,"Bar":"xxx"}`)
+	start := func(hookf func(state *fooState)) {
+		r := hook.NewRegistry()
+		var state fooState
+		r.RegisterHook("peer-relation-changed", func() error {
+			hookf(&state)
+			return nil
+		})
+		r.RegisterContext(nopContextSetter, &state)
+		os.Args = []string{"exe", "peer-relation-changed"}
+		ctxt, pstate, err := hook.NewContextFromEnvironment(r)
+		c.Assert(err, gc.IsNil)
+		defer ctxt.Close()
+		err = hook.Main(r, ctxt, pstate)
+		c.Assert(err, gc.IsNil)
+	}
+	start(func(state *fooState) {
+		c.Assert(state, gc.DeepEquals, &fooState{})
+	})
+	start(func(state *fooState) {
+		c.Assert(state, gc.DeepEquals, &fooState{})
+		state.Foo = 88
+		state.Bar = "xxx"
+	})
+	start(func(state *fooState) {
+		c.Assert(state, gc.DeepEquals, &fooState{
+			Foo: 88,
+			Bar: "xxx",
+		})
+		state.Foo = 10
+	})
+	start(func(state *fooState) {
+		c.Assert(state, gc.DeepEquals, &fooState{
+			Foo: 10,
+			Bar: "xxx",
+		})
+	})
 }
 
 func (s *HookSuite) TestContextGetter(c *gc.C) {
 	// TODO
 }
 
-func (s *HookSuite) TestGetRelation(c *gc.C) {
+func (s *HookSuite) TestRelationValuesFromRelationHook(c *gc.C) {
 	s.StartServer(c, 0, "peer0/0")
 	ctxt := s.newContext(c, "peer-relation-changed")
 	defer ctxt.Close()
-
-	val, err := ctxt.GetRelation("private-address")
-	c.Assert(err, gc.IsNil)
-	c.Assert(val, gc.Equals, "peer0-0.example.com")
+	c.Assert(ctxt.RelationIds, jc.DeepEquals, allRelationIds)
+	c.Assert(ctxt.Relations, jc.DeepEquals, allRelationValues)
 }
 
-func (s *HookSuite) TestGetRelationUnit(c *gc.C) {
+func (s *HookSuite) TestRelationValuesFromNonRelationHook(c *gc.C) {
 	s.StartServer(c, 0, "peer0/0")
-	ctxt := s.newContext(c, "peer-relation-changed")
+	ctxt := s.newContext(c, "config-changed")
 	defer ctxt.Close()
-
-	val, err := ctxt.GetRelationUnit("peer1:1", "peer1/1", "private-address")
-	c.Assert(err, gc.IsNil)
-	c.Assert(val, gc.Equals, "peer1-1.example.com")
-}
-
-func (s *HookSuite) TestGetRelationUnitUnknown(c *gc.C) {
-	s.StartServer(c, 0, "peer0/0")
-	ctxt := s.newContext(c, "peer-relation-changed")
-	defer ctxt.Close()
-	val, err := ctxt.GetRelationUnit("unknown:99", "peer1/1", "private-address")
-	c.Check(val, gc.Equals, "")
-	c.Assert(err, gc.ErrorMatches, `invalid value "unknown:99" for flag -r: unknown relation id`)
-}
-
-func (s *HookSuite) TestGetAllRelation(c *gc.C) {
-	s.StartServer(c, 0, "peer0/0")
-	ctxt := s.newContext(c, "peer-relation-changed")
-	defer ctxt.Close()
-
-	val, err := ctxt.GetAllRelation()
-	c.Assert(err, gc.IsNil)
-	c.Assert(val, gc.DeepEquals, map[string]string{"private-address": "peer0-0.example.com"})
+	c.Assert(ctxt.RelationIds, jc.DeepEquals, allRelationIds)
+	c.Assert(ctxt.Relations, jc.DeepEquals, allRelationValues)
 }
 
 func (s *HookSuite) TestGetAllRelationUnit(c *gc.C) {
@@ -230,7 +211,7 @@ func (s *HookSuite) TestGetAllRelationUnit(c *gc.C) {
 	ctxt := s.newContext(c, "peer-relation-changed")
 	defer ctxt.Close()
 
-	val, err := ctxt.GetAllRelationUnit("peer1:1", "peer1/1")
+	val, err := hook.CtxtGetAllRelationUnit(ctxt, "peer1:1", "peer1/1")
 	c.Assert(err, gc.IsNil)
 	c.Assert(val, gc.DeepEquals, map[string]string{"private-address": "peer1-1.example.com"})
 }
@@ -240,9 +221,9 @@ func (s *HookSuite) TestRelationIds(c *gc.C) {
 	ctxt := s.newContext(c, "peer-relation-changed")
 	defer ctxt.Close()
 
-	val, err := ctxt.RelationIds("peer0")
+	val, err := hook.CtxtRelationIds(ctxt, "peer0")
 	c.Assert(err, gc.IsNil)
-	c.Assert(val, gc.DeepEquals, []string{"peer0:0"})
+	c.Assert(val, gc.DeepEquals, []hook.RelationId{"peer0:0"})
 }
 
 func (s *HookSuite) TestRelationUnits(c *gc.C) {
@@ -250,21 +231,9 @@ func (s *HookSuite) TestRelationUnits(c *gc.C) {
 	ctxt := s.newContext(c, "peer-relation-changed")
 	defer ctxt.Close()
 
-	val, err := ctxt.RelationUnits("peer1:1")
+	val, err := hook.CtxtRelationUnits(ctxt, "peer1:1")
 	c.Assert(err, gc.IsNil)
-	c.Assert(val, gc.DeepEquals, []string{"peer1/0", "peer1/1"})
-}
-
-func (s *HookSuite) TestAllRelationUnits(c *gc.C) {
-	s.StartServer(c, 0, "peer0/0")
-	ctxt := s.newContext(c, "peer-relation-changed")
-	defer ctxt.Close()
-
-	val, err := ctxt.AllRelationUnits("peer0")
-	c.Assert(err, gc.IsNil)
-	c.Assert(val, gc.DeepEquals, map[string][]string{
-		"peer0:0": {"peer0/0", "peer0/1"},
-	})
+	c.Assert(val, gc.DeepEquals, []hook.UnitId{"peer1/0", "peer1/1"})
 }
 
 func (s *HookSuite) TestGetConfig(c *gc.C) {
@@ -275,6 +244,10 @@ func (s *HookSuite) TestGetConfig(c *gc.C) {
 	val, err := ctxt.GetConfig("spline-reticulation")
 	c.Assert(err, gc.IsNil)
 	c.Assert(val, gc.Equals, 45.0)
+
+	val, err = ctxt.GetConfig("title")
+	c.Assert(err, gc.IsNil)
+	c.Assert(val, gc.Equals, "My Title")
 
 	val, err = ctxt.GetConfig("unknown")
 	c.Assert(err, gc.IsNil)
@@ -468,102 +441,138 @@ func (s *HookSuite) TestRegisterConfig(c *gc.C) {
 
 func (s *HookSuite) TestMain(c *gc.C) {
 	s.StartServer(c, 0, "peer0/0")
-	called := false
-	r := hook.NewRegistry()
-	registerSimpleHook(r, "peer-relation-changed", func(ctxt *hook.Context) error {
-		called = true
-		var localState *string
-		err := ctxt.LocalState("x", &localState)
+	r0 := hook.NewRegistry()
+	var localState0 string
+	var ctxt0 *hook.Context
+	r0.RegisterContext(func(ctxt *hook.Context) error {
+		ctxt0 = ctxt
+		return nil
+	}, &localState0)
+	called0 := false
+	r0.RegisterHook("peer-relation-changed", func() error {
+		called0 = true
+		localState0 = "value"
+		val, err := ctxt0.GetConfig("title")
 		c.Check(err, gc.IsNil)
-		*localState = "value"
-		val, err := ctxt.GetRelationUnit("peer1:1", "peer1/1", "private-address")
-		c.Check(err, gc.IsNil)
-		c.Check(val, gc.Equals, "peer1-1.example.com")
+		c.Check(val, gc.Equals, "My Title")
 		return nil
 	})
 	os.Args = []string{"exe", "peer-relation-changed"}
-	err := hook.Main(r)
-	c.Assert(err, gc.IsNil)
 
-	// Check that the local state has been saved.
-	ctxt, err := hook.NewContext()
+	ctxt, state, err := hook.NewContextFromEnvironment(r0)
 	c.Assert(err, gc.IsNil)
 	defer ctxt.Close()
-	var localState *string
-	err = ctxt.LocalState("x", &localState)
+
+	err = hook.Main(r0, ctxt, state)
 	c.Assert(err, gc.IsNil)
-	c.Assert(*localState, gc.Equals, "value")
+	c.Assert(called0, gc.Equals, true)
+
+	// Check that when the same hook is invoked again, the
+	// state is retrieved correctly.
+	r1 := hook.NewRegistry()
+	var localState1 string
+	r1.RegisterContext(nopContextSetter, &localState1)
+	called1 := false
+	r1.RegisterHook("peer-relation-changed", func() error {
+		c.Assert(localState1, gc.Equals, "value")
+		called1 = true
+		return nil
+	})
+	err = s.runMain(c, r1)
+	c.Assert(err, gc.IsNil)
+	c.Assert(called1, gc.Equals, true)
+}
+
+func (s *HookSuite) TestWildcardHook(c *gc.C) {
+	s.StartServer(c, 0, "peer0/0")
+	r := hook.NewRegistry()
+	var called []string
+	register := func(name string) {
+		r.RegisterHook(name, func() error {
+			called = append(called, name)
+			return nil
+		})
+	}
+	register("config-changed")
+	register("relation-peer0-changed")
+	register("*")
+	os.Args = []string{"exe", "config-changed"}
+	err := s.runMain(c, r)
+	c.Assert(err, gc.IsNil)
+	c.Assert(called, jc.DeepEquals, []string{"config-changed", "*"})
+
+	called = nil
+	os.Args = []string{"exe", "relation-peer0-changed"}
+	err = s.runMain(c, r)
+	c.Assert(err, gc.IsNil)
+	c.Assert(called, jc.DeepEquals, []string{"relation-peer0-changed", "*"})
 }
 
 func (s *HookSuite) TestMainFailsWhenCannotSaveState(c *gc.C) {
 	s.StartServer(c, 0, "peer0/0")
 	r := hook.NewRegistry()
-	registerSimpleHook(r, "peer-relation-changed", func(ctxt *hook.Context) error {
-		var x *int
-		if err := ctxt.LocalState("x", &x); err != nil {
-			return errors.Wrap(err)
-		}
-		err := os.Chmod(*hook.HookStateDir, 0)
-		c.Check(err, gc.IsNil)
-		return nil
-	})
+	var state int
+	r.RegisterContext(nopContextSetter, &state)
+	r.RegisterHook("peer-relation-changed", func() error { return nil })
 	os.Args = []string{"exe", "peer-relation-changed"}
-	err := hook.Main(r)
-	c.Logf("err info: %v", errors.Info(err))
-	c.Assert(err, gc.ErrorMatches, "cannot save local state: .*")
-}
-
-func (s *HookSuite) TestMainCleansUpLocalStateOnStopHook(c *gc.C) {
-	s.StartServer(c, 0, "peer0/0")
-	r := hook.NewRegistry()
-	r1 := r.NewRegistry("sub")
-	registerSimpleHook(r1, "peer-relation-changed", func(ctxt *hook.Context) error {
-		var x *int
-		return ctxt.LocalState("x", &x)
-	})
-	// Create some local state.
-	os.Args = []string{"exe", "peer-relation-changed"}
-	err := hook.Main(r)
-	c.Assert(err, gc.IsNil)
-
-	// Check that the state directory exists.
-	ctxt, err := hook.NewContext()
+	ctxt, _, err := hook.NewContextFromEnvironment(r)
 	c.Assert(err, gc.IsNil)
 	defer ctxt.Close()
-	_, err = os.Stat(ctxt.StateDir())
-	c.Assert(err, gc.IsNil)
-
-	// Run the stop hook and check that the state directory has been removed.
-	os.Args = []string{"exe", "stop"}
-	err = hook.Main(r)
-	c.Assert(err, gc.IsNil)
-	_, err = os.Stat(ctxt.StateDir())
-	c.Assert(os.IsNotExist(err), gc.Equals, true)
-
-	// Check that the top level localstate directory still exists, but
-	// is now empty.
-	infos, err := ioutil.ReadDir(*hook.HookStateDir)
-	c.Assert(err, gc.IsNil)
-	c.Assert(infos, gc.HasLen, 0)
+	err = hook.Main(r, ctxt, errorState{})
+	c.Assert(err, gc.ErrorMatches, "cannot save local state: cannot save state for root: save error")
 }
 
-func (s *HookSuite) TestMainWithEmptyRegistry(c *gc.C) {
-	err := hook.Main(hook.NewRegistry())
-	c.Assert(err, gc.ErrorMatches, "no registered hooks or commands")
+type errorState struct{}
+
+func (errorState) Load(name string) ([]byte, error) {
+	return nil, nil
 }
 
-func (s *HookSuite) TestMainUsage(c *gc.C) {
+func (errorState) Save(name string, data []byte) error {
+	return errors.New("save error")
+}
+
+func (s *HookSuite) TestContextFromEnvironmentUsage(c *gc.C) {
 	r := hook.NewRegistry()
-	r.RegisterCommand("server", func() {})
-	r.RegisterCommand("client", func() {})
+	r.RegisterCommand(func([]string) {})
+	r.Clone("client").RegisterCommand(func([]string) {})
 	r.RegisterHook("peer-relation-changed", func() error { return nil })
 	r.RegisterHook("config-changed", func() error { return nil })
 	os.Args = []string{"exe"}
-	err := hook.Main(r)
-	c.Assert(err, gc.ErrorMatches, `usage: runhook cmd-server \[arg\.\.\.]
-	| runhook cmd-client \[arg\.\.\.]
-	| runhook config-changed
-	| runhook peer-relation-changed`)
+	_, _, err := hook.NewContextFromEnvironment(r)
+	c.Assert(err, gc.ErrorMatches, `usage: runhook cmd-root \[arg\.\.\.]
+	\| runhook cmd-root\.client \[arg\.\.\.]
+	\| runhook config-changed
+	\| runhook peer-relation-changed`)
+}
+
+func (s *HookSuite) TestRegisterCommandTwice(c *gc.C) {
+	r := hook.NewRegistry()
+	r.RegisterCommand(func([]string) {})
+	c.Assert(func() {
+		r.RegisterCommand(func([]string) {})
+	}, gc.PanicMatches, `command registered twice on registry root`)
+
+	r1 := r.Clone("foo")
+	r1.RegisterCommand(func([]string) {})
+	c.Assert(func() {
+		r1.RegisterCommand(func([]string) {})
+	}, gc.PanicMatches, `command registered twice on registry root\.foo`)
+}
+
+func (s *HookSuite) TestRegisterContextTwice(c *gc.C) {
+	r := hook.NewRegistry()
+	var i int
+	r.RegisterContext(nopContextSetter, &i)
+	c.Assert(func() {
+		r.RegisterContext(nopContextSetter, &i)
+	}, gc.PanicMatches, `RegisterContext called more than once`)
+
+	r1 := r.Clone("foo")
+	r1.RegisterContext(nopContextSetter, &i)
+	c.Assert(func() {
+		r1.RegisterContext(nopContextSetter, &i)
+	}, gc.PanicMatches, `RegisterContext called more than once`)
 }
 
 func (s *HookSuite) TestCommandCall(c *gc.C) {
@@ -571,48 +580,48 @@ func (s *HookSuite) TestCommandCall(c *gc.C) {
 
 	r := hook.NewRegistry()
 	callArgs := make(map[string][]string)
-	cmdFunc := func(name string) func() {
-		return func() {
-			callArgs[name] = append([]string{}, os.Args...)
+	cmdFunc := func(name string) func([]string) {
+		return func(args []string) {
+			callArgs[name] = append([]string{}, args...)
 		}
 	}
 
-	r.RegisterCommand("main", cmdFunc("main"))
-	r.RegisterCommand("other", cmdFunc("other"))
-	r1 := r.NewRegistry("sub")
-	r1.RegisterCommand("main", cmdFunc("main-sub"))
+	r.RegisterCommand(cmdFunc("main"))
+	r1 := r.Clone("sub")
+	r1.RegisterCommand(cmdFunc("main-sub"))
 
 	var cmdNames []string
 	registerSimpleHook(r, "install", func(ctxt *hook.Context) error {
-		cmdNames = append(cmdNames,
-			ctxt.CommandName("main"),
-			ctxt.CommandName("other"),
-		)
+		cmdNames = append(cmdNames, ctxt.CommandName())
 		return nil
 	})
 	registerSimpleHook(r1, "install", func(ctxt *hook.Context) error {
-		cmdNames = append(cmdNames,
-			ctxt.CommandName("main"),
-		)
+		cmdNames = append(cmdNames, ctxt.CommandName())
 		return nil
 	})
 	// invoke install hook, so we can find out the
 	// reported command names.,
 	os.Args = []string{"exe", "install"}
-	err := hook.Main(r)
+	ctxt := &hook.Context{
+		HookName: "install",
+		Runner:   nopRunner{},
+	}
+	err := hook.Main(r, ctxt, nil)
 	c.Assert(err, gc.IsNil)
-	c.Assert(cmdNames, gc.HasLen, 3)
+	c.Assert(cmdNames, gc.HasLen, 2)
 
-	for _, name := range cmdNames {
-		os.Args = []string{"exe", name, "arg1", "arg2"}
-		err := hook.Main(r)
+	for i, name := range cmdNames {
+		os.Args = []string{"exe", name, fmt.Sprint(i), "arg1", "arg2"}
+		ctxt, state, err := hook.NewContextFromEnvironment(r)
 		c.Assert(err, gc.IsNil)
+		err = hook.Main(r, ctxt, state)
+		c.Assert(err, gc.IsNil)
+		defer ctxt.Close()
 	}
 
 	c.Assert(callArgs, gc.DeepEquals, map[string][]string{
-		"main":     {"exe", "arg1", "arg2"},
-		"other":    {"exe", "arg1", "arg2"},
-		"main-sub": {"exe", "arg1", "arg2"},
+		"main":     {"0", "arg1", "arg2"},
+		"main-sub": {"1", "arg1", "arg2"},
 	})
 }
 
@@ -623,12 +632,8 @@ type localState struct {
 
 var latestState = make(map[string]localState)
 
-func localStateHookFunc(name string) func(*hook.Context) error {
-	return func(ctxt *hook.Context) error {
-		var state *localState
-		if err := ctxt.LocalState(name, &state); err != nil {
-			return errors.Wrap(err)
-		}
+func localStateHookFunc(state *localState, name string) func() error {
+	return func() error {
 		if state.Name != name && state.Name != "" {
 			panic(errors.Newf("unexpected name in state: %q; expected %q", state.Name, name))
 		}
@@ -639,16 +644,46 @@ func localStateHookFunc(name string) func(*hook.Context) error {
 	}
 }
 
+func nopContextSetter(ctxt *hook.Context) error {
+	return nil
+}
+
 func registerLevel1(name string, r *hook.Registry) {
-	registerSimpleHook(r, "config-changed", localStateHookFunc(name+"-0"))
-	registerSimpleHook(r, "peer-relation-changed", localStateHookFunc(name+"-0"))
+	var state localState
+	r.RegisterContext(nopContextSetter, &state)
+	r.RegisterHook("config-changed", localStateHookFunc(&state, name))
+	r.RegisterHook("peer-relation-changed", localStateHookFunc(&state, name))
 }
 
 func registerLevel0(r *hook.Registry) {
-	registerLevel1("level1-0", r.NewRegistry("level1-0"))
-	registerLevel1("level1-1", r.NewRegistry("level1-1"))
-	registerSimpleHook(r, "config-changed", localStateHookFunc("level0-config"))
-	registerSimpleHook(r, "other-relation-changed", localStateHookFunc("level0-other"))
+	registerLevel1("level1-0", r.Clone("level1-0"))
+	registerLevel1("level1-1", r.Clone("level1-1"))
+
+	var state localState
+	r.RegisterContext(nopContextSetter, &state)
+
+	r.RegisterHook("config-changed", localStateHookFunc(&state, "level0"))
+	r.RegisterHook("other-relation-changed", localStateHookFunc(&state, "level0"))
+}
+
+type memState map[string][]byte
+
+func (s memState) Save(name string, data []byte) error {
+	s[name] = data
+	return nil
+}
+
+func (s memState) Load(name string) ([]byte, error) {
+	return s[name], nil
+}
+
+// runMain runs hook.Main with a context created from the
+// environment.
+func (s *HookSuite) runMain(c *gc.C, r *hook.Registry) error {
+	ctxt, state, err := hook.NewContextFromEnvironment(r)
+	c.Assert(err, gc.IsNil)
+	defer ctxt.Close()
+	return hook.Main(r, ctxt, state)
 }
 
 func (s *HookSuite) TestHierarchicalLocalState(c *gc.C) {
@@ -660,46 +695,43 @@ func (s *HookSuite) TestHierarchicalLocalState(c *gc.C) {
 	registerLevel0(r)
 	os.Args = []string{"", "config-changed"}
 	for i := 0; i < 3; i++ {
-		err := hook.Main(r)
+		err := s.runMain(c, r)
 		c.Assert(err, gc.IsNil)
 	}
 	os.Args = []string{"", "peer-relation-changed"}
 	for i := 0; i < 2; i++ {
-		err := hook.Main(r)
+		err := s.runMain(c, r)
 		c.Assert(err, gc.IsNil)
 	}
 	os.Args = []string{"", "other-relation-changed"}
-	err := hook.Main(r)
+	err := s.runMain(c, r)
 	c.Assert(err, gc.IsNil)
 
-	c.Assert(latestState, gc.DeepEquals, map[string]localState{
-		"level1-0-0": {
+	c.Assert(latestState, jc.DeepEquals, map[string]localState{
+		"level1-0": {
 			CallCount: 5,
-			Name:      "level1-0-0",
+			Name:      "level1-0",
 		},
-		"level1-1-0": {
+		"level1-1": {
 			CallCount: 5,
-			Name:      "level1-1-0",
+			Name:      "level1-1",
 		},
-		"level0-config": {
-			CallCount: 3,
-			Name:      "level0-config",
-		},
-		"level0-other": {
-			CallCount: 1,
-			Name:      "level0-other",
+		"level0": {
+			CallCount: 4,
+			Name:      "level0",
 		},
 	})
 }
 
-func (s *HookSuite) TestMainWithUnregisteredHook(c *gc.C) {
+func (s *HookSuite) TestHookNotFound(c *gc.C) {
 	s.StartServer(c, 0, "peer0/0")
 	r := hook.NewRegistry()
-	registerSimpleHook(r, "install", func(*hook.Context) error { return nil })
+	r.RegisterHook("install", func() error { return nil })
+	r.RegisterHook("stop", func() error { return nil })
 	os.Args = []string{"exe", "peer-relation-changed"}
-	err := hook.Main(r)
+	err := s.runMain(c, r)
 	c.Assert(err, gc.ErrorMatches, `usage: runhook install
-	| runhook stop`)
+	\| runhook stop`)
 }
 
 func registerSimpleHook(r *hook.Registry, hookName string, hookFunc func(ctxt *hook.Context) error) {
@@ -707,8 +739,18 @@ func registerSimpleHook(r *hook.Registry, hookName string, hookFunc func(ctxt *h
 	r.RegisterContext(func(c *hook.Context) error {
 		ctxt = c
 		return nil
-	})
+	}, nil)
 	r.RegisterHook(hookName, func() error {
 		return hookFunc(ctxt)
 	})
+}
+
+type nopRunner struct{}
+
+func (nopRunner) Run(cmd string, args ...string) (stdout []byte, err error) {
+	return nil, nil
+}
+
+func (nopRunner) Close() error {
+	return nil
 }
