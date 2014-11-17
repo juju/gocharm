@@ -1,8 +1,8 @@
-// The runhook package implements a
+// The concat package implements a
 // charm that takes all the string values from units on upstream
 // relations, concatenates them and makes them available to downstream
 // relations.
-package runhook
+package concat
 
 import (
 	"fmt"

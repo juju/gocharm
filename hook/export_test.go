@@ -7,3 +7,5 @@ var (
 	CtxtRelationUnits      = (*Context).relationUnits
 	CtxtRelationIds        = (*Context).relationIds
 )
+
+type JujucRequest jujucRequest

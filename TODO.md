@@ -90,29 +90,3 @@ Possible for command line flags for the future:
 
 With -deploy, we can just make a repository in /tmp before deploying it to juju.
 
-
-Simplify LocalState
----------------
-
-If we remove the "name" argument, we make it so that
-any failure to call NewRegistry when passing a registry
-to other modules will fail more quickly.
-
-We could even make it so that LocalState is called
-at initial Registry time; perhaps make the local state
-an argument to RegisterContext. Then all the checking
-can happen at gocharm time.
-
-Is this general enough?
-
-Possible scenarios where it might not be:
-	we want an arbitrary number of pieces of local state.
-	- this can always be emulated by use of a map.
-
-It would be nice to lose the need for the name argument
-to NewRegistry.
-
-Rename NewRegistry
-----------------
-
-	func (r *Registry) Clone(name string) *Registry

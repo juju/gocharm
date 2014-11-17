@@ -5,7 +5,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/juju/juju/worker/uniter/context/jujuc"
 	"github.com/juju/utils/exec"
 	"launchpad.net/errgo/errors"
 )
@@ -45,8 +44,18 @@ func newToolRunnerFromEnvironment() (ToolRunner, error) {
 	}, nil
 }
 
+// jujucRequest contains the information necessary to run a Command remotely.
+// It is copied from github.com/juju/juju/worker/uniter/context/jujuc
+// so that we can avoid that dependency in non-test code.
+type jujucRequest struct {
+	ContextId   string
+	Dir         string
+	CommandName string
+	Args        []string
+}
+
 func (r *socketToolRunner) Run(cmd string, args ...string) (stdout []byte, err error) {
-	req := jujuc.Request{
+	req := jujucRequest{
 		ContextId: r.contextId,
 		// We will never use a command that uses a path name,
 		// but jujuc checks for an absolute path.

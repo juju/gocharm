@@ -1,4 +1,4 @@
-package runhook
+package concat
 
 import (
 	"fmt"

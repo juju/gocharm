@@ -26,6 +26,10 @@ func bufferString(w io.Writer) string {
 	return w.(*bytes.Buffer).String()
 }
 
+// statically check that the jujuc request type has been copied
+// correctly from context/jujuc.
+var _ jujuc.Request = jujuc.Request(hook.JujucRequest{})
+
 func GetHookServerContext(c *C, relid int, remote string) *ServerContext {
 	rels := map[int]*ServerContextRelation{
 		0: {
