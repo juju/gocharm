@@ -35,8 +35,8 @@ func RegisterHooks(r *hook.Registry) {
 		Type:        "string",
 	})
 	var concat concatenator
-	concat.http.Register(r.Clone("httpserver"), "http", &concat)
-	concat.svc.Register(r.Clone("service"), "", new(ConcatServer))
+	concat.http.Register(r.Clone("httpserver"), "http", nil)
+	concat.svc.Register(r.Clone("service"), "", startServer)
 
 	r.RegisterContext(concat.setContext, &concat.state)
 
@@ -57,8 +57,7 @@ func RegisterHooks(r *hook.Registry) {
 
 // localState holds persistent state for the concatenator charms.
 type localState struct {
-	Port int
-	Val  string
+	Val string
 }
 
 // concatenator manages the top level logic of the
@@ -69,17 +68,13 @@ type concatenator struct {
 	svc      service.Service
 	state    localState
 	oldState localState
+	oldPort  int
 }
 
 func (c *concatenator) setContext(ctxt *hook.Context) error {
 	c.ctxt = ctxt
 	c.oldState = c.state
-	return nil
-}
-
-func (c *concatenator) HTTPServerPortChanged(port int) error {
-	c.ctxt.Logf("http server port changed to %v", port)
-	c.state.Port = port
+	c.oldPort = c.http.Port()
 	return nil
 }
 
@@ -92,12 +87,8 @@ func (c *concatenator) changed() error {
 	if localVal != nil && localVal != "" {
 		vals = append(vals, localVal.(string))
 	}
-	c.ctxt.Logf("changed, localVal %v", localVal)
-	c.ctxt.Logf("relation ids %#v", c.ctxt.RelationIds)
-	c.ctxt.Logf("relations: %#v", c.ctxt.Relations)
 	for _, id := range c.ctxt.RelationIds["upstream"] {
 		units := c.ctxt.Relations[id]
-		c.ctxt.Logf("found %d units with relation id %s", len(units), id)
 		// Use all the values sorted by the unit they come from, so the charm
 		// output is deterministic.
 		unitIds := make(unitIdSlice, 0, len(units))
@@ -106,12 +97,10 @@ func (c *concatenator) changed() error {
 		}
 		sort.Sort(unitIds)
 		for _, unitId := range unitIds {
-			c.ctxt.Logf("appending %q", units[unitId]["val"])
 			vals = append(vals, units[unitId]["val"])
 		}
 	}
 	c.state.Val = fmt.Sprintf("{%s}", strings.Join(vals, " "))
-	c.ctxt.Logf("after changed, val is %q", c.state.Val)
 	return nil
 }
 
@@ -126,23 +115,13 @@ func (u unitIdSlice) Less(i, j int) bool { return u[i] < u[j] }
 // we get a consolidated view of the current state of the unit,
 // and can avoid doing too much.
 func (c *concatenator) finally() error {
-	c.ctxt.Logf("finally %s, state %#v; oldState %#v", c.ctxt.HookName, c.state, c.oldState)
-	if c.state == c.oldState {
+	if c.state == c.oldState && c.http.Port() == c.oldPort {
 		return nil
 	}
-	if c.state.Port != c.oldState.Port {
-		// The HTTP port has changed. Restart the server
-		// to use the new port.
-		if err := c.restartService(); err != nil {
-			return errors.Wrap(err)
-		}
-		return nil
-	}
-	if err := c.setServiceVal(); err != nil {
+	if err := c.notifyServer(); err != nil {
 		return errors.Wrap(err)
 	}
 	ids := c.ctxt.RelationIds["downstream"]
-	c.ctxt.Logf("setting downstream relations %v to %s", ids, c.state.Val)
 	for _, id := range ids {
 		if err := c.ctxt.SetRelationWithId(id, "val", c.state.Val); err != nil {
 			return errors.Wrapf(err, "cannot set relation %v", id)
@@ -151,36 +130,18 @@ func (c *concatenator) finally() error {
 	return nil
 }
 
-func (c *concatenator) restartService() error {
-	c.ctxt.Logf("restarting service")
-	if c.svc.Started() {
-		// Stop the service so that it can be restarted on a different
-		// port. In a more sophisticated program, this message the
-		// existing server so that it could wait for all outstanding
-		// requests to complete as well as starting the server
-		// on the new port.
-		if err := c.svc.Stop(); err != nil {
-			return errors.Wrapf(err, "cannot stop service")
+func (c *concatenator) notifyServer() error {
+	if !c.svc.Started() {
+		if err := c.svc.Start(c.ctxt.StateDir()); err != nil {
+			return errors.Wrap(err)
 		}
 	}
-	if err := c.svc.Start(); err != nil {
-		return errors.Wrapf(err, "cannot start service")
-	}
-	if err := c.setServiceVal(); err != nil {
-		return errors.Wrapf(err, "cannot set initial value")
-	}
-	err := c.svc.Call("ConcatServer.Start", &StartParams{
-		Port: c.state.Port,
-	}, empty)
+	err := c.svc.Call("ConcatServer.Set", &ServerState{
+		Val:  c.state.Val,
+		Port: c.http.Port(),
+	}, &struct{}{})
 	if err != nil {
-		return errors.Wrapf(err, "cannot set port on service")
+		return errors.Wrapf(err, "cannot set state in server")
 	}
 	return nil
-}
-
-func (c *concatenator) setServiceVal() error {
-	c.ctxt.Logf("setting service val to %s", c.state.Val)
-	return c.svc.Call("ConcatServer.SetVal", &SetValParams{
-		Val: c.state.Val,
-	}, empty)
 }

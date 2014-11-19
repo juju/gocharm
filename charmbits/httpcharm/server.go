@@ -53,8 +53,9 @@ type PortChanger interface {
 // side of an http relation with the given relation name.
 //
 // It takes care of opening and closing the configured port, but does
-// not actually start the HTTP handler server. It notifies that the port
-// has changed by calling changed.HTTPServerPortChanged.
+// not actually start the HTTP handler server. If changed is not nil, it
+// notifies that the port has changed by calling
+// changed.HTTPServerPortChanged.
 //
 // The port of the server is configured with the "server-port" charm
 // configuration option.
@@ -98,6 +99,12 @@ func (p *Provider) PrivateAddress() (string, error) {
 	return net.JoinHostPort(addr, strconv.Itoa(p.state.OpenedPort)), nil
 }
 
+// Port returns the configured port of the server.
+// If the port has not been set, it returns 0.
+func (p *Provider) Port() int {
+	return p.state.OpenedPort
+}
+
 func (p *Provider) configChanged() error {
 	var port int
 	if port0, err := p.ctxt.GetConfig("server-port"); err != nil {
@@ -124,8 +131,10 @@ func (p *Provider) configChanged() error {
 		return errors.Wrap(err)
 	}
 	p.state.OpenedPort = port
-	if err := p.changed.HTTPServerPortChanged(port); err != nil {
-		return errors.Wrap(err)
+	if p.changed != nil {
+		if err := p.changed.HTTPServerPortChanged(port); err != nil {
+			return errors.Wrap(err)
+		}
 	}
 	addr, err := p.PrivateAddress()
 	if err != nil {
