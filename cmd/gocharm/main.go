@@ -219,6 +219,7 @@ func cleanDestination(dir string) error {
 var allowed = map[string]bool{
 	"src":           true,
 	"bin":           true,
+	"hooks":         true,
 	"assets":        true,
 	"README.md":     true,
 	"metadata.yaml": true,
