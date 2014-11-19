@@ -3,6 +3,8 @@
 package service
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"net/rpc"
 	"path/filepath"
@@ -27,18 +29,18 @@ type Service struct {
 
 type localState struct {
 	Installed bool
+	Args      []string
 }
 
 // Register registers the service with the given registry. If
 // serviceName is non-empty, it specifies the name of the service,
 // otherwise the service will be named after the charm's unit.
 //
-// The serviceRPC parameter defines any methods that can be invoked
-// locally on the service, defined as for the rpc package (see
-// rpc.Server.Register). When the service has been started, these
-// methods may be invoked using the Service.Call method. Parameters and
-// return values will be marshaled as JSON.
-func (svc *Service) Register(r *hook.Registry, serviceName string, serviceRPC interface{}) {
+// When the service is started, the start function will be called
+// with the context for the running service and any arguments
+// that were passed to the Service.Start method.
+// When the start function returns, the service will exit.
+func (svc *Service) Register(r *hook.Registry, serviceName string, start func(ctxt *Context, args []string)) {
 	svc.serviceName = serviceName
 	r.RegisterContext(svc.setContext, &svc.state)
 	// TODO restart the service when the charm is upgraded.
@@ -46,7 +48,7 @@ func (svc *Service) Register(r *hook.Registry, serviceName string, serviceRPC in
 	// upgrades.
 	//r.RegisterHook("upgrade-charm", svc.upgradeCharm)
 	r.RegisterCommand(func(args []string) {
-		runServer(serviceRPC, args)
+		runServer(start, args)
 	})
 }
 
@@ -55,29 +57,32 @@ func (svc *Service) setContext(ctxt *hook.Context) error {
 	return nil
 }
 
-// Start starts the service if it is not already started.
-func (svc *Service) Start() error {
+// Start starts the service if it is not already started,
+// passing it the given arguments.
+// If the arguments are different from the last
+// time it was started, it will be stopped and then
+// started again with the new arguments.
+func (svc *Service) Start(args ...string) error {
 	svc.ctxt.Logf("starting service")
-	usvc := svc.upstartService()
-	if !svc.state.Installed {
-		svc.ctxt.Logf("installing service")
-		if err := usvc.Install(); err != nil {
-			return errors.Wrap(err)
-		}
-		svc.state.Installed = true
-		return nil
-	} else {
-		svc.ctxt.Logf("service already installed")
+	usvc := svc.upstartService(args)
+	// Note: Install will restart the service if the configuration
+	// file has changed.
+	if err := usvc.Install(); err != nil {
+		return errors.Wrapf(err, "cannot install service")
 	}
+	// If the service was already installed but not started,
+	// Install will not do anything, so ensure that the service
+	// is actually started.
 	if err := usvc.Start(); err != nil {
-		return errors.Wrap(err)
+		return errors.Wrapf(err, "cannot start service")
 	}
+	svc.state.Args = args
 	return nil
 }
 
 // Stop stops the service running.
 func (svc *Service) Stop() error {
-	if err := svc.upstartService().Stop(); err != nil {
+	if err := svc.upstartService(nil).Stop(); err != nil {
 		return errors.Wrap(err)
 	}
 	return nil
@@ -85,7 +90,7 @@ func (svc *Service) Stop() error {
 
 // Started reports whether the service has been started.
 func (svc *Service) Started() bool {
-	return svc.upstartService().Running()
+	return svc.upstartService(nil).Running()
 }
 
 // StopAndRemove stops and removes the service completely.
@@ -93,7 +98,7 @@ func (svc *Service) StopAndRemove() error {
 	if !svc.state.Installed {
 		return nil
 	}
-	if err := svc.upstartService().StopAndRemove(); err != nil {
+	if err := svc.upstartService(nil).StopAndRemove(); err != nil {
 		return errors.Wrap(err)
 	}
 	svc.state.Installed = false
@@ -132,22 +137,28 @@ func (svc *Service) socketPath() string {
 	return "@" + filepath.Join(svc.ctxt.StateDir(), "service")
 }
 
-func (svc *Service) upstartService() *upstart.Service {
+func (svc *Service) upstartService(args []string) *upstart.Service {
 	exe := filepath.Join(svc.ctxt.CharmDir, "bin", "runhook")
 	serviceName := svc.serviceName
 	if serviceName == "" {
 		serviceName = svc.ctxt.Unit.Tag().String()
 	}
+	// Marshal all arguments as JSON to avoid upstart quoting hassles.
+	p := serviceParams{
+		SocketPath: svc.socketPath(),
+		Args:       args,
+	}
+	pdata, err := json.Marshal(p)
+	if err != nil {
+		panic(errors.Wrapf(err, "cannot marshal parameters"))
+	}
+
 	return &upstart.Service{
 		Name: serviceName,
 		Conf: serviceCommon.Conf{
 			InitDir: "/etc/init",
 			Desc:    fmt.Sprintf("service for juju unit %q", svc.ctxt.Unit),
-			Cmd: fmt.Sprintf("%s %s %q",
-				exe,
-				svc.ctxt.CommandName(),
-				svc.socketPath(),
-			),
+			Cmd:     exe + " " + base64.StdEncoding.EncodeToString(pdata),
 			// TODO save output somewhere - we need a better answer for that.
 		},
 	}
