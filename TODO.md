@@ -29,6 +29,7 @@ For this to work, we should copy the charm hook
 binary somewhere else at install time,
 which also makes sense when we're running
 the charm binary as an external service.
+This can be done by the charmbits/service package.
 
 Is upgrade-charm called before or after the
 charm has been upgraded?
@@ -90,3 +91,8 @@ Possible for command line flags for the future:
 
 With -deploy, we can just make a repository in /tmp before deploying it to juju.
 
+Naming
+------
+
+Perhaps rename charmbits/*charm to charmbits/*relation
+e.g. httprelation.Provider.

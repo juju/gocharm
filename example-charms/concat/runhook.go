@@ -44,37 +44,42 @@ func RegisterHooks(r *hook.Registry) {
 	// functions below are guaranteed to run after any callbacks
 	// triggered by concat.http or concat.svc.
 
+	r.RegisterHook("upgrade-charm", concat.changed)
+	r.RegisterHook("config-changed", concat.changed)
 	r.RegisterHook("upstream-relation-changed", concat.changed)
 	r.RegisterHook("upstream-relation-departed", concat.changed)
-	r.RegisterHook("downstream-relation-joined", concat.changed)
-	r.RegisterHook("charm-upgraded", concat.changed)
-	r.RegisterHook("config-changed", concat.changed)
+	r.RegisterHook("downstream-relation-joined", concat.downstreamJoined)
 
 	// The finall method runs after any other hook, and
 	// reconciles any state changed by the hooks.
 	r.RegisterHook("*", concat.finally)
 }
 
-// localState holds persistent state for the concatenator charms.
+// localState holds persistent state for the concatenator charm.
 type localState struct {
-	Val string
+	Val  string
+	Port int
 }
 
 // concatenator manages the top level logic of the
 // concat charm.
 type concatenator struct {
-	ctxt     *hook.Context
-	http     httpcharm.Provider
-	svc      service.Service
-	state    localState
-	oldState localState
-	oldPort  int
+	ctxt *hook.Context
+	http httpcharm.Provider
+	svc  service.Service
+
+	// state holds a record of the committed state.
+	state localState
+
+	// newState and newPort hold the state as we would like it to be.
+	// If we succeed in notifying everything that needs to be
+	// notified, this will be committed to state.
+	newState localState
 }
 
 func (c *concatenator) setContext(ctxt *hook.Context) error {
 	c.ctxt = ctxt
-	c.oldState = c.state
-	c.oldPort = c.http.Port()
+	c.newState = c.state
 	return nil
 }
 
@@ -100,8 +105,13 @@ func (c *concatenator) changed() error {
 			vals = append(vals, units[unitId]["val"])
 		}
 	}
-	c.state.Val = fmt.Sprintf("{%s}", strings.Join(vals, " "))
+	c.newState.Val = fmt.Sprintf("{%s}", strings.Join(vals, " "))
+	c.newState.Port = c.http.Port()
 	return nil
+}
+
+func (c *concatenator) downstreamJoined() error {
+	return c.setDownstreamVal(c.ctxt.RelationId, c.state.Val)
 }
 
 type unitIdSlice []hook.UnitId
@@ -115,19 +125,29 @@ func (u unitIdSlice) Less(i, j int) bool { return u[i] < u[j] }
 // we get a consolidated view of the current state of the unit,
 // and can avoid doing too much.
 func (c *concatenator) finally() error {
-	if c.state == c.oldState && c.http.Port() == c.oldPort {
+	if c.newState == c.state {
+		c.ctxt.Logf("concat state is unchanged at %#v; doing nothing", c.state)
 		return nil
 	}
+	c.ctxt.Logf("concat state changed from %#v to %#v", c.state, c.newState)
 	if err := c.notifyServer(); err != nil {
 		return errors.Wrap(err)
 	}
 	ids := c.ctxt.RelationIds["downstream"]
 	for _, id := range ids {
-		if err := c.ctxt.SetRelationWithId(id, "val", c.state.Val); err != nil {
+		if err := c.setDownstreamVal(id, c.newState.Val); err != nil {
 			return errors.Wrapf(err, "cannot set relation %v", id)
 		}
 	}
+	// We've succeeded in notifying everything of the changes, so
+	// commit the state.
+	c.state = c.newState
 	return nil
+}
+
+func (c *concatenator) setDownstreamVal(id hook.RelationId, val string) error {
+	c.ctxt.Logf("setting downstream relation %q to %q", id, c.newState.Val)
+	return c.ctxt.SetRelationWithId(id, "val", val)
 }
 
 func (c *concatenator) notifyServer() error {
@@ -137,7 +157,7 @@ func (c *concatenator) notifyServer() error {
 		}
 	}
 	err := c.svc.Call("ConcatServer.Set", &ServerState{
-		Val:  c.state.Val,
+		Val:  c.newState.Val,
 		Port: c.http.Port(),
 	}, &struct{}{})
 	if err != nil {

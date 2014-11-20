@@ -6,6 +6,7 @@ var (
 	CtxtGetAllRelationUnit = (*Context).getAllRelationUnit
 	CtxtRelationUnits      = (*Context).relationUnits
 	CtxtRelationIds        = (*Context).relationIds
+	ValidHookName          = validHookName
 )
 
 type JujucRequest jujucRequest

@@ -71,7 +71,7 @@ func (p *Provider) Register(r *hook.Registry, relationName string, changed PortC
 		Description: "Port for the HTTP server to listen on",
 		Default:     8080,
 	})
-	r.RegisterHook("relation-"+relationName+"-joined", p.relationJoined)
+	r.RegisterHook(relationName+"-relation-joined", p.relationJoined)
 	r.RegisterHook("config-changed", p.configChanged)
 	r.RegisterContext(p.setContext, &p.state)
 	p.relationName = relationName

@@ -494,7 +494,7 @@ func (s *HookSuite) TestWildcardHook(c *gc.C) {
 		})
 	}
 	register("config-changed")
-	register("relation-peer0-changed")
+	register("peer0-relation-changed")
 	register("*")
 	os.Args = []string{"exe", "config-changed"}
 	err := s.runMain(c, r)
@@ -502,10 +502,10 @@ func (s *HookSuite) TestWildcardHook(c *gc.C) {
 	c.Assert(called, jc.DeepEquals, []string{"config-changed", "*"})
 
 	called = nil
-	os.Args = []string{"exe", "relation-peer0-changed"}
+	os.Args = []string{"exe", "peer0-relation-changed"}
 	err = s.runMain(c, r)
 	c.Assert(err, gc.IsNil)
-	c.Assert(called, jc.DeepEquals, []string{"relation-peer0-changed", "*"})
+	c.Assert(called, jc.DeepEquals, []string{"peer0-relation-changed", "*"})
 }
 
 func (s *HookSuite) TestMainFailsWhenCannotSaveState(c *gc.C) {
@@ -623,6 +623,26 @@ func (s *HookSuite) TestCommandCall(c *gc.C) {
 		"main":     {"0", "arg1", "arg2"},
 		"main-sub": {"1", "arg1", "arg2"},
 	})
+}
+
+var validHookNameTests = map[string]bool{
+	"config-changed":        true,
+	"changed-config":        false,
+	"install":               true,
+	"relation-changed":      false,
+	"foo-relation-changed":  true,
+	"relation-foo-changed":  false,
+	"foo0-relation-changed": true,
+	"-relation-changed":     false,
+	"foo-xrelation-changed": false,
+	"foo-relation-changedx": false,
+	"foo-relation-departed": true,
+}
+
+func (s *HookSuite) TestValidHookName(c *gc.C) {
+	for name, ok := range validHookNameTests {
+		c.Check(hook.ValidHookName(name), gc.Equals, ok, gc.Commentf("hook %s", name))
+	}
 }
 
 type localState struct {
