@@ -1,7 +1,7 @@
 package mongodbclient
 
 import (
-	"github.com/juju/gocharm/charmbits/mongodbcharm"
+	"github.com/juju/gocharm/charmbits/mongodbrelation"
 	"github.com/juju/gocharm/hook"
 )
 
@@ -14,7 +14,7 @@ func RegisterHooks(r *hook.Registry) {
 
 type charm struct {
 	ctxt    *hook.Context
-	mongodb mongodbcharm.Requirer
+	mongodb mongodbrelation.Requirer
 }
 
 func (c *charm) setContext(ctxt *hook.Context) error {
