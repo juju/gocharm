@@ -2,6 +2,7 @@ package hook
 
 import (
 	"encoding/json"
+	"log"
 	"os"
 	"sort"
 	"strings"
@@ -46,6 +47,7 @@ var relationEnvVars = []string{
 // generated code only.
 func Main(r *Registry, ctxt *Context, state PersistentState) (err error) {
 	if ctxt.RunCommandName != "" {
+		log.Printf("running command %q %q", ctxt.RunCommandName, ctxt.RunCommandArgs)
 		cmd := r.commands[ctxt.RunCommandName]
 		if cmd == nil {
 			return usageError(r)
@@ -53,6 +55,8 @@ func Main(r *Registry, ctxt *Context, state PersistentState) (err error) {
 		cmd(ctxt.RunCommandArgs)
 		return nil
 	}
+	ctxt.Logf("running hook %s {", ctxt.HookName)
+	defer ctxt.Logf("} %s", ctxt.HookName)
 	// Retrieve all persistent state.
 	// TODO read all of the state in one operation from a single file?
 	if err := loadState(r, state); err != nil {

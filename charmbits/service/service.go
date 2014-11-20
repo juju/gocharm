@@ -6,7 +6,10 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/rpc"
+	"net/rpc/jsonrpc"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -43,10 +46,9 @@ type localState struct {
 func (svc *Service) Register(r *hook.Registry, serviceName string, start func(ctxt *Context, args []string)) {
 	svc.serviceName = serviceName
 	r.RegisterContext(svc.setContext, &svc.state)
-	// TODO restart the service when the charm is upgraded.
-	// We could also perhaps provide some way to do zero-downtime
-	// upgrades.
-	//r.RegisterHook("upgrade-charm", svc.upgradeCharm)
+	// TODO Perhaps provide some way to do zero-downtime
+	// upgrades?
+	r.RegisterHook("upgrade-charm", svc.upgradeCharm)
 	r.RegisterCommand(func(args []string) {
 		runServer(start, args)
 	})
@@ -57,12 +59,26 @@ func (svc *Service) setContext(ctxt *hook.Context) error {
 	return nil
 }
 
+func (svc *Service) upgradeCharm() error {
+	if err := svc.Stop(); err != nil {
+		return errors.Wrapf(err, "cannot stop service")
+	}
+	if err := svc.Start(svc.state.Args...); err != nil {
+		return errors.Wrapf(err, "cannot restart service")
+	}
+	return nil
+}
+
 // Start starts the service if it is not already started,
 // passing it the given arguments.
 // If the arguments are different from the last
 // time it was started, it will be stopped and then
 // started again with the new arguments.
 func (svc *Service) Start(args ...string) error {
+	// Create the state directory in preparation for the log output.
+	if err := os.MkdirAll(svc.ctxt.StateDir(), 0700); err != nil {
+		return errors.Wrapf(err, "cannot create state directory")
+	}
 	svc.ctxt.Logf("starting service")
 	usvc := svc.upstartService(args)
 	// Note: Install will restart the service if the configuration
@@ -76,6 +92,7 @@ func (svc *Service) Start(args ...string) error {
 	if err := usvc.Start(); err != nil {
 		return errors.Wrapf(err, "cannot start service")
 	}
+	svc.state.Installed = true
 	svc.state.Args = args
 	return nil
 }
@@ -120,7 +137,7 @@ func (svc *Service) Call(method string, args interface{}, reply interface{}) err
 		// The service may be notionally started not be actually
 		// running yet, so try for a short while if it fails.
 		for a := shortAttempt.Start(); a.Next(); {
-			c, err := rpc.Dial("unix", svc.socketPath())
+			c, err := dialRPC(svc.socketPath())
 			if err == nil {
 				svc.rpcClient = c
 				break
@@ -131,6 +148,14 @@ func (svc *Service) Call(method string, args interface{}, reply interface{}) err
 		}
 	}
 	return svc.rpcClient.Call(method, args, reply)
+}
+
+func dialRPC(path string) (*rpc.Client, error) {
+	c, err := net.Dial("unix", path)
+	if err != nil {
+		return nil, errors.Wrap(err)
+	}
+	return rpc.NewClientWithCodec(jsonrpc.NewClientCodec(c)), nil
 }
 
 func (svc *Service) socketPath() string {
@@ -152,14 +177,16 @@ func (svc *Service) upstartService(args []string) *upstart.Service {
 	if err != nil {
 		panic(errors.Wrapf(err, "cannot marshal parameters"))
 	}
-
+	cmd := exe + " " +
+		svc.ctxt.CommandName() + " " +
+		base64.StdEncoding.EncodeToString(pdata)
 	return &upstart.Service{
 		Name: serviceName,
 		Conf: serviceCommon.Conf{
 			InitDir: "/etc/init",
 			Desc:    fmt.Sprintf("service for juju unit %q", svc.ctxt.Unit),
-			Cmd:     exe + " " + base64.StdEncoding.EncodeToString(pdata),
-			// TODO save output somewhere - we need a better answer for that.
+			Cmd:     cmd,
+			Out:     filepath.Join(svc.ctxt.StateDir(), "servicelog.out"),
 		},
 	}
 }

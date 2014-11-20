@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net"
 	"net/rpc"
 	"net/rpc/jsonrpc"
@@ -20,6 +21,7 @@ type serviceParams struct {
 // runServer runs the server side of the service. It is invoked
 // (indirectly) by upstart.
 func runServer(start func(ctxt *Context, args []string), args []string) {
+	log.Printf("server started %q", args)
 	if len(args) != 1 {
 		fatalf("expected exactly one argument, found %q", args)
 	}

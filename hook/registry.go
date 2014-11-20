@@ -4,9 +4,12 @@ import (
 	"fmt"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 
+	"github.com/juju/names"
 	"gopkg.in/juju/charm.v4"
+	"gopkg.in/juju/charm.v4/hooks"
 	"launchpad.net/errgo/errors"
 )
 
@@ -102,9 +105,9 @@ func (r *Registry) Clone(name string) *Registry {
 // one returns an error.
 func (r *Registry) RegisterHook(name string, f func() error) {
 	// TODO(rog) implement validHookName
-	//if !validHookName(name) {
-	//	panic(fmt.Errorf("invalid hook name %q", name))
-	//}
+	if name != "*" && !validHookName(name) {
+		panic(fmt.Errorf("invalid hook name %q", name))
+	}
 	r.hooks[name] = append(r.hooks[name], hookFunc{
 		run:          f,
 		registryName: r.name,
@@ -228,4 +231,34 @@ func (r *Registry) RegisteredRelations() map[string]charm.Relation {
 // that have been registered with RegisterConfig.
 func (r *Registry) RegisteredConfig() map[string]charm.Option {
 	return r.config
+}
+
+var relationHookPattern = regexp.MustCompile("^(?:(" + names.RelationSnippet + ")-)?(relation-[a-z]+)$")
+
+var hookNames = map[hooks.Kind]bool{
+	hooks.Install:            true,
+	hooks.Start:              true,
+	hooks.ConfigChanged:      true,
+	hooks.UpgradeCharm:       true,
+	hooks.Stop:               true,
+	hooks.ActionRequested:    true,
+	hooks.Action:             true,
+	hooks.CollectMetrics:     true,
+	hooks.MeterStatusChanged: true,
+	hooks.RelationJoined:     true,
+	hooks.RelationChanged:    true,
+	hooks.RelationDeparted:   true,
+	hooks.RelationBroken:     true,
+}
+
+func validHookName(s string) bool {
+	if m := relationHookPattern.FindStringSubmatch(s); m != nil {
+		if m[1] == "" {
+			// The user has specified a relation hook name with
+			// no relation.
+			return false
+		}
+		s = m[2]
+	}
+	return hookNames[hooks.Kind(s)]
 }

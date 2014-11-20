@@ -69,6 +69,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/juju/utils/fs"
@@ -126,6 +127,10 @@ func main() {
 	if _, err := canClean(dest); err != nil {
 		fatalf("cannot clean destination directory: %v", err)
 	}
+	rev, err := readRevision(dest)
+	if err != nil {
+		fatalf("cannot read revision: %v", err)
+	}
 
 	// We put everything into a directory in /tmp first,
 	// so we have less chance of deleting everything from
@@ -151,6 +156,17 @@ func main() {
 	}); err != nil {
 		fatalf("%v", err)
 	}
+
+	// The local revision number should not matter, but
+	// there is a bug in juju that means that the charm
+	// will not be correctly uploaded if it is not there, so we
+	// preserve the revision found in the destination directory.
+	if rev != -1 {
+		rev++
+		if err := writeRevision(tempCharmDir, rev); err != nil {
+			fatalf("cannot write revision file: %v", err)
+		}
+	}
 	if err := cleanDestination(dest); err != nil {
 		fatalf("%v", err)
 	}
@@ -170,9 +186,10 @@ func main() {
 		}
 	}
 	curl := &charm.URL{
-		Schema: "local",
-		Series: *series,
-		Name:   charmName,
+		Schema:   "local",
+		Series:   *series,
+		Name:     charmName,
+		Revision: -1,
 	}
 	fmt.Println(curl)
 }
@@ -217,13 +234,14 @@ func cleanDestination(dir string) error {
 }
 
 var allowed = map[string]bool{
-	"src":           true,
-	"bin":           true,
-	"hooks":         true,
 	"assets":        true,
-	"README.md":     true,
-	"metadata.yaml": true,
+	"bin":           true,
 	"config.yaml":   true,
+	"hooks":         true,
+	"metadata.yaml": true,
+	"README.md":     true,
+	"revision":      true,
+	"src":           true,
 }
 
 func canClean(dir string) (needRemove []string, err error) {
@@ -282,63 +300,27 @@ func readAllCharms() []*charm.CharmDir {
 	return dirs
 }
 
-func readNamedCharms(names []string) []*charm.CharmDir {
-	series, err := readRepoSeries()
+func readRevision(charmDir string) (int, error) {
+	path := revisionPath(charmDir)
+	data, err := ioutil.ReadFile(path)
+	if os.IsNotExist(err) {
+		// No revision file, nothing to increment.
+		return -1, nil
+	}
 	if err != nil {
-		return nil
+		return 0, errors.Wrap(err)
 	}
-	var dirs []*charm.CharmDir
-	for _, name := range names {
-		if strings.Index(name, "/") != -1 {
-			dirs = appendCharmDir(dirs, filepath.Join(*repo, filepath.FromSlash(name)))
-			continue
-		}
-		for _, s := range series {
-			path := filepath.Join(*repo, s, name)
-			if _, err := os.Stat(filepath.Join(path, "metadata.yaml")); err != nil {
-				continue
-			}
-			dirs = appendCharmDir(dirs, path)
-		}
+	rev, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil || rev < 0 {
+		return 0, fmt.Errorf("invalid number %q in %s", data, path)
 	}
-	return dirs
+	return rev, nil
 }
 
-func readRepoSeries() ([]string, error) {
-	infos, err := ioutil.ReadDir(*repo)
-	if err != nil {
-		return nil, errors.Newf("cannot read charm repo dir: %v", err)
-	}
-	var series []string
-	for _, info := range infos {
-		if info.IsDir() {
-			series = append(series, info.Name())
-		}
-	}
-	if len(series) == 0 {
-		return nil, errors.Newf("no series found in charm repository %q", *repo)
-	}
-	return series, nil
+func writeRevision(charmDir string, rev int) error {
+	return ioutil.WriteFile(revisionPath(charmDir), []byte(strconv.Itoa(rev)), 0666)
 }
 
-func charmFromCurrentDir() (*charm.CharmDir, error) {
-	dir, err := os.Getwd()
-	if err != nil {
-		return nil, err
-	}
-	repoDir := filepath.Clean(*repo)
-	if !strings.HasPrefix(dir, repoDir+string(filepath.Separator)) {
-		return nil, errors.Newf("current directory is not inside charm repository %q", *repo)
-	}
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "metadata.yaml")); err == nil {
-			break
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return nil, errors.New("cannot find charm containing current directory")
-		}
-		dir = parent
-	}
-	return charm.ReadCharmDir(dir)
+func revisionPath(charmDir string) string {
+	return filepath.Join(charmDir, "revision")
 }

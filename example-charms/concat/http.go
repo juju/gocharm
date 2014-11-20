@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -20,6 +21,7 @@ import (
 // actual HTTP server will not start until the
 // initial value and port have been set.
 func startServer(ctxt *service.Context, args []string) {
+	log.Printf("concat server started %q", args)
 	if len(args) != 1 {
 		fatalf("need exactly one argument, got %q", args)
 		os.Exit(2)
@@ -78,13 +80,16 @@ func (svc *ConcatServer) Set(p *ServerState, _ *struct{}) error {
 // set sets the current state of the server, and starts
 // or restarts the HTTP listener when appropriate.
 func (svc *ConcatServer) set(state ServerState) error {
+	log.Printf("concat set state %#v; current state %#v", state, svc.state)
 	if state.Port == 0 || state.Port != svc.state.Port {
 		if svc.listener != nil {
+			log.Printf("closing listener")
 			svc.listener.Close()
 			svc.listener = nil
 		}
 	}
-	if state.Port != 0 {
+	if svc.listener == nil && state.Port != 0 {
+		log.Printf("listening on %d", state.Port)
 		addr := ":" + strconv.Itoa(state.Port)
 		listener, err := net.Listen("tcp", addr)
 		if err != nil {
@@ -140,6 +145,9 @@ func (svc *ConcatServer) saveState(state ServerState) error {
 
 func (svc *ConcatServer) loadState() (ServerState, error) {
 	data, err := ioutil.ReadFile(svc.statePath())
+	if os.IsNotExist(err) {
+		return ServerState{}, nil
+	}
 	if err != nil {
 		return ServerState{}, errors.Wrap(err)
 	}
