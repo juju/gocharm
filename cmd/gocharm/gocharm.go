@@ -58,27 +58,34 @@ func fatalf(f string, a ...interface{}) {
 }
 `))
 
-type buildRunHookParams struct {
-	pkg      *build.Package
-	goFile   string
-	exe      string
+type buildCharmParams struct {
+	// pkg specifies the package that the hook will be built from.
+	pkg *build.Package
+
+	// charmDir specifies the destination directory to write
+	// the charm files to.
 	charmDir string
-	tempDir  string
+
+	// tempDir holds a temporary directory to use for
+	// any temporary build artifacts.
+	tempDir string
 }
 
-// buildRunHook builds the runhook executable
-// from the given charm package.
-// It puts the runhook source file into goFile
+// buildCharm builds the runhook executable,
+// and all the other charm pieces (hooks, metadata.yaml,
+// config.yaml). It puts the runhook source file into goFile
 // and the runhook executable into exe.
-func buildRunHook(p buildRunHookParams) error {
+func buildCharm(p buildCharmParams) error {
 	code, err := generateCode(hookMainCode, p.pkg.ImportPath)
 	if err != nil {
 		return errors.Wrapf(err, "cannot generate main code")
 	}
-	if err := compile(p.goFile, p.exe, code, true); err != nil {
+	exe := filepath.Join(p.charmDir, "bin", "runhook")
+	goFile := filepath.Join(p.charmDir, "src", "runhook", "runhook.go")
+	if err := compile(goFile, exe, code, true); err != nil {
 		return errors.Wrapf(err, "cannot build hooks main package")
 	}
-	if _, err := os.Stat(p.exe); err != nil {
+	if _, err := os.Stat(exe); err != nil {
 		return errors.New("runhook command not built")
 	}
 	info, err := registeredCharmInfo(p.pkg.ImportPath, p.tempDir)
@@ -153,6 +160,9 @@ func writeMeta(pkg *build.Package, charmDir string, relations map[string]charm.R
 	if err != nil {
 		return errors.Wrapf(err, "cannot read metadata.yaml from %q", pkg.Dir)
 	}
+	// The metadata name must match the directory name otherwise
+	// juju deploy will ignore the charm.
+	meta.Name = filepath.Base(pkg.Dir)
 	meta.Provides = make(map[string]charm.Relation)
 	meta.Requires = make(map[string]charm.Relation)
 	meta.Peers = make(map[string]charm.Relation)

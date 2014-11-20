@@ -147,10 +147,8 @@ func main() {
 		fatalf("cannot copy package contents: %v", err)
 	}
 
-	if err := buildRunHook(buildRunHookParams{
+	if err := buildCharm(buildCharmParams{
 		pkg:      pkg,
-		goFile:   filepath.Join(tempCharmDir, "src", "runhook", "runhook.go"),
-		exe:      filepath.Join(tempCharmDir, "bin", "runhook"),
 		charmDir: tempCharmDir,
 		tempDir:  tempDir,
 	}); err != nil {

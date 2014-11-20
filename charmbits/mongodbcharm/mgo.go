@@ -3,6 +3,7 @@ package mongodbcharm
 import (
 	"net"
 	"sort"
+	"strings"
 
 	"gopkg.in/juju/charm.v4"
 	"launchpad.net/errgo/errors"
@@ -31,9 +32,9 @@ type localState struct {
 }
 
 // Register registers a mongodb requirer relation with the given
-// relation name with the given hook registry. When the
-// mongo addresses change, intf.MongoDBAddresses will
-// be called with the new addresses.
+// relation name with the given hook registry. If intf is non-nil,
+// intf.MongoDBAddresses will be called with the mongodb addresses if
+// when they change.
 func (req *Requirer) Register(r *hook.Registry, relationName string, intf Interface) {
 	req.relationName = relationName
 	req.intf = intf
@@ -43,9 +44,9 @@ func (req *Requirer) Register(r *hook.Registry, relationName string, intf Interf
 		Interface: "mongodb",
 		Role:      charm.RoleRequirer,
 	})
-	r.RegisterHook("relation-"+req.relationName+"-joined", req.changed)
-	r.RegisterHook("relation-"+req.relationName+"-changed", req.changed)
-	r.RegisterHook("relation-"+req.relationName+"-left", req.changed)
+	r.RegisterHook(req.relationName+"-relation-joined", req.changed)
+	r.RegisterHook(req.relationName+"-relation-changed", req.changed)
+	r.RegisterHook(req.relationName+"-relation-departed", req.changed)
 }
 
 func (req *Requirer) setContext(ctxt *hook.Context) error {
@@ -62,14 +63,28 @@ func (req *Requirer) changed() error {
 		return nil
 	}
 	req.state.Addresses = addrs
-	if err := req.intf.MongoDBAddressesChanged(addrs); err != nil {
-		return errors.Wrap(err)
+	if req.intf != nil {
+		if err := req.intf.MongoDBAddressesChanged(addrs); err != nil {
+			return errors.Wrap(err)
+		}
 	}
 	return nil
 }
 
+// Addresses returns the addresses of the current mongodb servers.
 func (req *Requirer) Addresses() []string {
 	return req.state.Addresses
+}
+
+// URL returns a URL suitable for passing to mgo.Dial.
+// If there are no current addresses, it returns the
+// empty string.
+// TODO does this work with IPv6?
+func (req *Requirer) URL() string {
+	if len(req.state.Addresses) == 0 {
+		return ""
+	}
+	return "mongodb://" + strings.Join(req.state.Addresses, ",")
 }
 
 func (req *Requirer) currentAddresses() ([]string, error) {
@@ -84,6 +99,7 @@ func (req *Requirer) currentAddresses() ([]string, error) {
 	id := ids[0]
 	var addrs []string
 	for _, vals := range req.ctxt.Relations[id] {
+		req.ctxt.Logf("got values from mongo relation: %#v", vals)
 		host := vals["hostname"]
 		if host == "" {
 			continue
