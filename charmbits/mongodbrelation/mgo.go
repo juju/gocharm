@@ -1,4 +1,5 @@
-package mongodbcharm
+// The mongodbrelation package implements a Juju mongodb relation.
+package mongodbrelation
 
 import (
 	"net"

@@ -12,7 +12,7 @@ import (
 	"gopkg.in/juju/charm.v4"
 	"launchpad.net/errgo/errors"
 
-	"github.com/juju/gocharm/charmbits/httpcharm"
+	"github.com/juju/gocharm/charmbits/httprelation"
 	"github.com/juju/gocharm/charmbits/service"
 	"github.com/juju/gocharm/hook"
 )
@@ -65,7 +65,7 @@ type localState struct {
 // concat charm.
 type concatenator struct {
 	ctxt *hook.Context
-	http httpcharm.Provider
+	http httprelation.Provider
 	svc  service.Service
 
 	// state holds a record of the committed state.

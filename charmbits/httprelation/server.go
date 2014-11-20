@@ -1,8 +1,6 @@
-// The httpcharm package can be used in a charm
+// The httprelation package can be used in a charm
 // that uses a relation with interface type "http".
-//
-// This package is currently experimental.
-package httpcharm
+package httprelation
 
 import (
 	"flag"
