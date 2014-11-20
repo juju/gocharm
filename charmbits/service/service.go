@@ -44,6 +44,9 @@ type localState struct {
 // that were passed to the Service.Start method.
 // When the start function returns, the service will exit.
 func (svc *Service) Register(r *hook.Registry, serviceName string, start func(ctxt *Context, args []string)) {
+	if start == nil {
+		panic("nil start function passed to Service.Register")
+	}
 	svc.serviceName = serviceName
 	r.RegisterContext(svc.setContext, &svc.state)
 	// TODO Perhaps provide some way to do zero-downtime
@@ -123,7 +126,7 @@ func (svc *Service) StopAndRemove() error {
 }
 
 var shortAttempt = utils.AttemptStrategy{
-	Total: 250 * time.Millisecond,
+	Total: 2 * time.Second,
 	Delay: 5 * time.Millisecond,
 }
 

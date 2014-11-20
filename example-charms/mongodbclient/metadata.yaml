@@ -1,0 +1,7 @@
+name: mongodddddbclient
+summary: 'example mongodb client'
+description: |
+    This provides an example of how to use a mongodb requires
+    relation.
+
+ 
