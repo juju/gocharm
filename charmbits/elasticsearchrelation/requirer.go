@@ -4,8 +4,6 @@ package elasticsearchrelation
 import (
 	"net"
 
-	"launchpad.net/errgo/errors"
-
 	"github.com/juju/gocharm/charmbits/simplerelation"
 	"github.com/juju/gocharm/hook"
 )
@@ -37,7 +35,7 @@ func unitAddress(vals map[string]string) (string, error) {
 	}
 	port := vals["port"]
 	if port == "" {
-		return "", errors.Newf("elastic search host %q found with no port", host)
+		port = "9200"
 	}
 	return net.JoinHostPort(host, port), nil
 }
