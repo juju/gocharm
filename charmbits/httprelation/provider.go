@@ -79,7 +79,7 @@ func (p *Provider) configChanged() error {
 		}
 		p.state.OpenedPort = 0
 	}
-	if p.state.OpenedPort == 0 {
+	if port == 0 {
 		return p.prov.SetValues(map[string]string{
 			"hostname": "",
 			"port":     "",
