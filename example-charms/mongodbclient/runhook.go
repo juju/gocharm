@@ -8,7 +8,7 @@ import (
 func RegisterHooks(r *hook.Registry) {
 	var c charm
 	r.RegisterContext(c.setContext, nil)
-	c.mongodb.Register(r.Clone("mongodb"), "mongodb", nil)
+	c.mongodb.Register(r.Clone("mongodb"), "mongodb")
 	r.RegisterHook("*", c.changed)
 }
 

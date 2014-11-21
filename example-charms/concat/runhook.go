@@ -35,7 +35,7 @@ func RegisterHooks(r *hook.Registry) {
 		Type:        "string",
 	})
 	var concat concatenator
-	concat.http.Register(r.Clone("httpserver"), "http", nil)
+	concat.http.Register(r.Clone("httpserver"), "http")
 	concat.svc.Register(r.Clone("service"), "", startServer)
 
 	r.RegisterContext(concat.setContext, &concat.state)
