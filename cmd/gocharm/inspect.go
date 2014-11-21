@@ -14,12 +14,9 @@ import (
 )
 
 func registeredCharmInfo(pkg, tempDir string) (*charmInfo, error) {
-	code, err := generateCode(inspectCode, pkg)
-	if err != nil {
-		return nil, errors.Wrapf(err, "cannot generate inspect code")
-	}
+	code:= generateCode(inspectCode, pkg)
 	inspectExe := filepath.Join(tempDir, "inspect")
-	err = compile(filepath.Join(tempDir, "inspect.go"), inspectExe, code, false)
+	err := compile(filepath.Join(tempDir, "inspect.go"), inspectExe, code, false)
 	if err != nil {
 		return nil, errors.Wrapf(err, "cannot build hook inspection code")
 	}
