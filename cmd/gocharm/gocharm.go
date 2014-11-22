@@ -363,7 +363,7 @@ func executeTemplate(t *template.Template, param interface{}) []byte {
 }
 
 var compileScript = `#!/bin/sh
-set -ex
+set -e
 if test -z "$CHARM_DIR"; then
 	echo CHARM_DIR not set >&2
 	exit 2
