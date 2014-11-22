@@ -14,7 +14,7 @@ import (
 )
 
 func registeredCharmInfo(pkg, tempDir string) (*charmInfo, error) {
-	code:= generateCode(inspectCode, pkg)
+	code := generateCode(inspectCode, pkg)
 	inspectExe := filepath.Join(tempDir, "inspect")
 	err := compile(filepath.Join(tempDir, "inspect.go"), inspectExe, code, false)
 	if err != nil {

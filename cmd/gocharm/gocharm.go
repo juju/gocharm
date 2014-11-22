@@ -161,10 +161,13 @@ func (b *charmBuilder) writeHooks(hooks []string) error {
 	return nil
 }
 
+// hookStubTemplate holds the template for the generated hook code.
+// The apt-get flags are stolen from github.com/juju/utils/apt
 var hookStubTemplate = template.Must(template.New("").Parse(`#!/bin/sh
 set -ex
 {{if eq .HookName "install"}}
-apt-get install golang
+apt-get '--option=Dpkg::Options::=--force-confold'  '--option=Dpkg::options::=--force-unsafe-io' --assume-yes --quiet install golang git mercurial
+
 if test -e "$CHARM_DIR/bin/runhook"; then
 	# the binary has been pre-compiled; no need to compile again.
 	exit 0
@@ -365,6 +368,7 @@ if test -z "$CHARM_DIR"; then
 	echo CHARM_DIR not set >&2
 	exit 2
 fi
+export PATH="$CHARM_DIR/bin:$PATH"
 cd "$CHARM_DIR/src/runhook"
 export GOPATH="$CHARM_DIR:$(godep path)"
 go install

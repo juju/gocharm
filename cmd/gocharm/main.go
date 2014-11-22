@@ -252,7 +252,7 @@ var allowed = map[string]bool{
 	"dependencies.tsv": true,
 	"hooks":            true,
 	"metadata.yaml":    true,
-	"pkg": true,				// This allows us to test the compile scripts in the charm dir.
+	"pkg":              true, // This allows us to test the compile scripts in the charm dir.
 	"README.md":        true,
 	"revision":         true,
 	"src":              true,
