@@ -59,14 +59,14 @@ func (p *Provider) Port() int {
 
 func (p *Provider) configChanged() error {
 	var port int
-	if port0, err := p.ctxt.GetConfig("server-port"); err != nil {
-		return errors.Wrapf(err, "cannot set server context")
-	} else {
-		if port = int(port0.(float64)); port <= 0 || port >= 65535 {
-			p.ctxt.Logf("ignoring invalid port %v", port0)
-			// TODO status-set appropriately if/when status-set is implemented
-			return nil
-		}
+	port, err := p.ctxt.GetConfigInt("server-port")
+	if err != nil {
+		return errors.Wrapf(err, "cannot set server port")
+	}
+	if port <= 0 || port >= 65535 {
+		p.ctxt.Logf("ignoring invalid port %v", port)
+		// TODO status-set appropriately if/when status-set is implemented
+		return nil
 	}
 	if port == p.state.OpenedPort {
 		return nil

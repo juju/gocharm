@@ -238,22 +238,73 @@ func (ctxt *Context) SetRelationWithId(relationId RelationId, keyvals ...string)
 	return errors.Wrap(err)
 }
 
-// GetConfig returns the charm configuration value for the given
-// key. Both int- and float-typed values will be returned as float64.
-func (ctxt *Context) GetConfig(key string) (interface{}, error) {
-	var val interface{}
-	if err := ctxt.runJson(&val, "config-get", "--format", "json", "--", key); err != nil {
-		return nil, errors.Wrap(err)
+// GetConfig reads the charm configuration value for the given
+// key into the value pointed to by val, which should be
+// a pointer to one of the possible configuration option
+// types (string, int, float64 or boolean).
+// To find out whether a value has actually been set (is non-null)
+// pass a pointer to a pointer to the desired type.
+func (ctxt *Context) GetConfig(key string, val interface{}) error {
+	if err := ctxt.runJson(val, "config-get", "--format", "json", "--", key); err != nil {
+		return errors.Wrapf(err, "cannot get configuration option %q", key)
+	}
+	return nil
+}
+
+// GetConfigString returns the charm configuration value for the given
+// key as a string. It returns the empty string if the value has not been
+// set.
+func (ctxt *Context) GetConfigString(key string) (string, error) {
+	var val string
+	if err := ctxt.GetConfig(key, &val); err != nil {
+		return "", errors.Wrap(err)
 	}
 	return val, nil
 }
 
-func (ctxt *Context) GetAllConfig() (map[string]interface{}, error) {
-	var val map[string]interface{}
-	if err := ctxt.runJson(&val, "config-get", "--format", "json"); err != nil {
-		return nil, errors.Wrap(err)
+// GetConfigString returns the charm configuration value for the given
+// key as an int. It returns zero if the value has not been
+// set.
+func (ctxt *Context) GetConfigInt(key string) (int, error) {
+	var val int
+	if err := ctxt.GetConfig(key, &val); err != nil {
+		return 0, errors.Wrap(err)
 	}
 	return val, nil
+}
+
+// GetConfigString returns the charm configuration value for the given
+// key as a float64. It returns zero if the value has not been
+// set.
+func (ctxt *Context) GetConfigFloat64(key string) (float64, error) {
+	var val float64
+	if err := ctxt.GetConfig(key, &val); err != nil {
+		return 0, errors.Wrap(err)
+	}
+	return val, nil
+}
+
+// GetConfigString returns the charm configuration value for the given
+// key as a bool. It returns false if the value has not been
+// set.
+func (ctxt *Context) GetConfigBool(key string) (bool, error) {
+	var val bool
+	if err := ctxt.GetConfig(key, &val); err != nil {
+		return false, errors.Wrap(err)
+	}
+	return val, nil
+}
+
+// GetAllConfig unmarshals all the configuration values from
+// a JSON object into the given value, which should be a pointer
+// to a struct or a map. To get all values without knowing
+// what they might be, pass in a pointer to a map[string]interface{}
+// value,
+func (ctxt *Context) GetAllConfig(val interface{}) error {
+	if err := ctxt.runJson(&val, "config-get", "--format", "json"); err != nil {
+		return errors.Wrap(err)
+	}
+	return nil
 }
 
 func (ctxt *Context) runJson(dst interface{}, cmd string, args ...string) error {
@@ -262,7 +313,7 @@ func (ctxt *Context) runJson(dst interface{}, cmd string, args ...string) error 
 		return errors.Wrap(err)
 	}
 	if err := json.Unmarshal(out, dst); err != nil {
-		return errors.Newf("cannot parse command output %q into %T: %v", out, dst, err)
+		return errors.Wrapf(err, "cannot parse command output %q", out)
 	}
 	return nil
 }

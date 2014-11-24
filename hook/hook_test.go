@@ -236,22 +236,116 @@ func (s *HookSuite) TestRelationUnits(c *gc.C) {
 	c.Assert(val, gc.DeepEquals, []hook.UnitId{"peer1/0", "peer1/1"})
 }
 
-func (s *HookSuite) TestGetConfig(c *gc.C) {
+func (s *HookSuite) TestGetFloatConfig(c *gc.C) {
 	s.StartServer(c, 0, "peer0/0")
 	ctxt := s.newContext(c, "peer-relation-changed")
 	defer ctxt.Close()
 
-	val, err := ctxt.GetConfig("spline-reticulation")
+	var valInterface interface{}
+	err := ctxt.GetConfig("spline-reticulation", &valInterface)
 	c.Assert(err, gc.IsNil)
-	c.Assert(val, gc.Equals, 45.0)
+	c.Assert(valInterface, gc.Equals, 45.0)
 
-	val, err = ctxt.GetConfig("title")
+	valFloat64, err := ctxt.GetConfigFloat64("spline-reticulation")
 	c.Assert(err, gc.IsNil)
-	c.Assert(val, gc.Equals, "My Title")
+	c.Assert(valFloat64, gc.Equals, 45.0)
 
-	val, err = ctxt.GetConfig("unknown")
+	valInt, err := ctxt.GetConfigInt("spline-reticulation")
 	c.Assert(err, gc.IsNil)
-	c.Assert(val, gc.Equals, nil)
+	c.Assert(valInt, gc.Equals, 45)
+
+	valBool, err := ctxt.GetConfigBool("spline-reticulation")
+	c.Assert(err, gc.ErrorMatches, badConfigTypeErrorPat("spline-reticulation", "bool"))
+	c.Assert(valBool, gc.Equals, false)
+
+	valString, err := ctxt.GetConfigString("spline-reticulation")
+	c.Assert(err, gc.ErrorMatches, badConfigTypeErrorPat("spline-reticulation", "string"))
+	c.Assert(valString, gc.Equals, "")
+}
+
+func badConfigTypeErrorPat(key, type_ string) string {
+	return fmt.Sprintf(`cannot get configuration option %q: cannot parse command output ".*": json: cannot unmarshal .* into Go value of type %s`, key, type_)
+}
+
+func (s *HookSuite) TestGetStringConfig(c *gc.C) {
+	s.StartServer(c, 0, "peer0/0")
+	ctxt := s.newContext(c, "peer-relation-changed")
+	defer ctxt.Close()
+
+	var valInterface interface{}
+	err := ctxt.GetConfig("title", &valInterface)
+	c.Assert(err, gc.IsNil)
+	c.Assert(valInterface, gc.Equals, "My Title")
+
+	valFloat64, err := ctxt.GetConfigFloat64("title")
+	c.Assert(err, gc.ErrorMatches, badConfigTypeErrorPat("title", "float64"))
+	c.Assert(valFloat64, gc.Equals, 0.0)
+
+	valInt, err := ctxt.GetConfigInt("title")
+	c.Assert(err, gc.ErrorMatches, badConfigTypeErrorPat("title", "int"))
+	c.Assert(valInt, gc.Equals, 0)
+
+	valBool, err := ctxt.GetConfigBool("title")
+	c.Assert(err, gc.ErrorMatches, badConfigTypeErrorPat("title", "bool"))
+	c.Assert(valBool, gc.Equals, false)
+
+	valString, err := ctxt.GetConfigString("title")
+	c.Assert(err, gc.IsNil)
+	c.Assert(valString, gc.Equals, "My Title")
+}
+
+func (s *HookSuite) TestGetBoolConfig(c *gc.C) {
+	s.StartServer(c, 0, "peer0/0")
+	ctxt := s.newContext(c, "peer-relation-changed")
+	defer ctxt.Close()
+
+	var valInterface interface{}
+	err := ctxt.GetConfig("monsters", &valInterface)
+	c.Assert(err, gc.IsNil)
+	c.Assert(valInterface, gc.Equals, true)
+
+	valFloat64, err := ctxt.GetConfigFloat64("monsters")
+	c.Assert(err, gc.ErrorMatches, badConfigTypeErrorPat("monsters", "float64"))
+	c.Assert(valFloat64, gc.Equals, 0.0)
+
+	valInt, err := ctxt.GetConfigInt("monsters")
+	c.Assert(err, gc.ErrorMatches, badConfigTypeErrorPat("monsters", "int"))
+	c.Assert(valInt, gc.Equals, 0)
+
+	valBool, err := ctxt.GetConfigBool("monsters")
+	c.Assert(err, gc.IsNil)
+	c.Assert(valBool, gc.Equals, true)
+
+	valString, err := ctxt.GetConfigString("monsters")
+	c.Assert(err, gc.ErrorMatches, badConfigTypeErrorPat("monsters", "string"))
+	c.Assert(valString, gc.Equals, "")
+}
+
+func (s *HookSuite) TestGetIntConfig(c *gc.C) {
+	s.StartServer(c, 0, "peer0/0")
+	ctxt := s.newContext(c, "peer-relation-changed")
+	defer ctxt.Close()
+
+	var valInterface interface{}
+	err := ctxt.GetConfig("red-balloon-count", &valInterface)
+	c.Assert(err, gc.IsNil)
+	c.Assert(valInterface, gc.Equals, 99.0)
+
+	valFloat64, err := ctxt.GetConfigFloat64("red-balloon-count")
+	c.Assert(err, gc.IsNil)
+	c.Assert(valFloat64, gc.Equals, 99.0)
+
+	valInt, err := ctxt.GetConfigInt("red-balloon-count")
+	c.Assert(err, gc.IsNil)
+	c.Assert(valInt, gc.Equals, 99)
+
+	valBool, err := ctxt.GetConfigBool("red-balloon-count")
+	c.Assert(err, gc.ErrorMatches, badConfigTypeErrorPat("red-balloon-count", "bool"))
+	c.Assert(valBool, gc.Equals, false)
+
+	valString, err := ctxt.GetConfigString("red-balloon-count")
+	c.Assert(err, gc.ErrorMatches, badConfigTypeErrorPat("red-balloon-count", "string"))
+	c.Assert(valString, gc.Equals, "")
 }
 
 func (s *HookSuite) TestGetAllConfig(c *gc.C) {
@@ -259,14 +353,27 @@ func (s *HookSuite) TestGetAllConfig(c *gc.C) {
 	ctxt := s.newContext(c, "peer-relation-changed")
 	defer ctxt.Close()
 
-	val, err := ctxt.GetAllConfig()
+	var m map[string]interface{}
+	err := ctxt.GetAllConfig(&m)
 	c.Assert(err, gc.IsNil)
-	c.Assert(val, gc.DeepEquals, map[string]interface{}{
-		"monsters":            false,
+	c.Assert(m, gc.DeepEquals, map[string]interface{}{
+		"monsters":            true,
 		"spline-reticulation": 45.0,
+		"red-balloon-count":   99.0,
 		"title":               "My Title",
 		"username":            "admin001",
 	})
+
+	var cfg struct {
+		Monsters *bool  `json:"monsters"`
+		Title    string `json:"title"`
+		Other    string
+	}
+	err = ctxt.GetAllConfig(&cfg)
+	c.Assert(err, gc.IsNil)
+	c.Assert(*cfg.Monsters, gc.Equals, true)
+	c.Assert(cfg.Title, gc.Equals, "My Title")
+	c.Assert(cfg.Other, gc.Equals, "")
 }
 
 func (s *HookSuite) TestRegister(c *gc.C) {
@@ -452,7 +559,7 @@ func (s *HookSuite) TestMain(c *gc.C) {
 	r0.RegisterHook("peer-relation-changed", func() error {
 		called0 = true
 		localState0 = "value"
-		val, err := ctxt0.GetConfig("title")
+		val, err := ctxt0.GetConfigString("title")
 		c.Check(err, gc.IsNil)
 		c.Check(val, gc.Equals, "My Title")
 		return nil
