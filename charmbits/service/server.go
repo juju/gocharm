@@ -64,10 +64,12 @@ func (ctxt *Context) ServeLocalRPC(rcvr interface{}) error {
 		return errors.Wrapf(err, "cannot listen on local socket")
 	}
 	for {
+		log.Printf("accepting local service on %s", ctxt.socketPath)
 		conn, err := listener.Accept()
 		if err != nil {
 			return errors.Wrapf(err, "local socket accept failed")
 		}
+		log.Printf("accepted dial request")
 		go srv.ServeCodec(jsonrpc.NewServerCodec(conn))
 	}
 }
