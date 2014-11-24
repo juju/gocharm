@@ -142,8 +142,9 @@ func (c *ServerContext) AddMetric(string, string, time.Time) error {
 
 func (c *ServerContext) ConfigSettings() (charm.Settings, error) {
 	return map[string]interface{}{
-		"monsters":            false,
+		"monsters":            true,
 		"spline-reticulation": 45.0,
+		"red-balloon-count":   99,
 		"title":               "My Title",
 		"username":            "admin001",
 	}, nil

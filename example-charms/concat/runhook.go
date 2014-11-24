@@ -85,12 +85,12 @@ func (c *concatenator) setContext(ctxt *hook.Context) error {
 
 func (c *concatenator) changed() error {
 	var vals []string
-	localVal, err := c.ctxt.GetConfig("val")
+	localVal, err := c.ctxt.GetConfigString("val")
 	if err != nil {
 		return errors.Wrap(err)
 	}
-	if localVal != nil && localVal != "" {
-		vals = append(vals, localVal.(string))
+	if localVal != "" {
+		vals = append(vals, localVal)
 	}
 	for _, id := range c.ctxt.RelationIds["upstream"] {
 		units := c.ctxt.Relations[id]
