@@ -1,5 +1,18 @@
 // Gocharm processes a Go package ("." by default) and installs it as a
-// Juju charm.
+// Juju charm. It should be invoked as follows:
+//
+//	gocharm [flags] [package]
+//
+// The following flags are supported:
+//
+//	  -repo="": charm repo directory (defaults to $JUJU_REPOSITORY)
+//	  -series="trusty": select the os version to deploy the charm as
+//	  -source=false: include source code instead of binary executable
+//	  -v=false: print information about charms being built
+//
+// If the -source flag is specified, all source dependencies are installed
+// in the destination charm directory, otherwise just the package
+// source itself and the compiled binary.
 //
 // In order to qualify as a charm, a Go package must implement
 // a RegisterHooks function with the following signature:
@@ -40,22 +53,6 @@
 // all registered charm configuration options.
 // A hooks directory will be created containing an entry
 // for each registered hook.
-//
-// TODO allow a mode that does not compile locally, installing golang
-// on the remote node and compiling the code there.
-//
-// TODO add -clean flag.
-//
-// TODO use godeps to freeze dependencies into the charm.
-//
-// TODO examples.
-//
-// TODO validate metadata against actual registered hooks.
-// If there's a hook registered against a relation that's
-// not declared, or there's a hook declared but no hooks are
-// registered for it, return an error.
-//
-// TODO allow multiple packages to be installed at once?
 package main
 
 import (

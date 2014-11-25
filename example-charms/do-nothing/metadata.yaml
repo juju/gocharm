@@ -1,0 +1,4 @@
+name: do-nothing
+summary: 'any example that does nothing at all'
+description: |
+    This example charm does nothing.

@@ -1,26 +1,8 @@
-Different build modes.
+Support godeps
 ----------------
 
-- build in advance (what we do currently)
-- build at deploy time, pulling in deps using godeps
-- build at deploy time, using vendored deps
-- rebuild on every hook execution (config option?)
-
-Also, it may well be better to support a "deploy to"
-mode rather than changing the charm in place
-as it does currently.
-
-    gocharm upload local:trusty/mycharm
-
-	- we have to be careful about this, as it may
-	require overwriting the target.
-
-    gocharm upload cs:trusty/mycharm
-
-Generate start and install hooks
-------------------------
-
-Currently we require them to be specified.
+We should implement the godeps flag as a lighter weight alternative
+to the -source mode.
 
 Upgrading
 --------
@@ -78,6 +60,13 @@ then we abort; otherwise we wipe out everything from the
 target directory and replace it with stuff copied from the charm
 package as specified above.
 
+Support for cross-series / architecture compilation.
+-----------------------------
+
+The default destination charm series should be taken from the current series.
+We should support a -arch flag to compile for other architectures, and
+have some way for the hooks to know what binary to run
+depending on the host architecture.
 
 Possible for command line flags for the future:
 -----------------------------------
