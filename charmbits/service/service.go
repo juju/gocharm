@@ -51,7 +51,7 @@ func (svc *Service) Register(r *hook.Registry, serviceName string, start func(ct
 	r.RegisterContext(svc.setContext, &svc.state)
 	// TODO Perhaps provide some way to do zero-downtime
 	// upgrades?
-	r.RegisterHook("upgrade-charm", svc.upgradeCharm)
+	r.RegisterHook("upgrade-charm", svc.Restart)
 	r.RegisterCommand(func(args []string) {
 		runServer(start, args)
 	})
@@ -62,7 +62,7 @@ func (svc *Service) setContext(ctxt *hook.Context) error {
 	return nil
 }
 
-func (svc *Service) upgradeCharm() error {
+func (svc *Service) Restart() error {
 	if err := svc.Stop(); err != nil {
 		return errors.Wrapf(err, "cannot stop service")
 	}
@@ -137,6 +137,7 @@ func (svc *Service) Call(method string, args interface{}, reply interface{}) err
 		if !svc.state.Installed {
 			return errors.New("service is not started")
 		}
+		svc.ctxt.Logf("dialing rpc server on %s", svc.socketPath())
 		// The service may be notionally started not be actually
 		// running yet, so try for a short while if it fails.
 		for a := shortAttempt.Start(); a.Next(); {
@@ -146,11 +147,17 @@ func (svc *Service) Call(method string, args interface{}, reply interface{}) err
 				break
 			}
 			if !a.HasNext() {
-				return errors.Wrap(err)
+				return errors.Wrapf(err, "cannot dial %q", svc.socketPath())
 			}
 		}
+		svc.ctxt.Logf("dial succeeded")
 	}
-	return svc.rpcClient.Call(method, args, reply)
+	svc.ctxt.Logf("calling rpc client")
+	err := svc.rpcClient.Call(method, args, reply)
+	if err != nil {
+		return errors.Wrapf(err, "local service call failed")
+	}
+	return nil
 }
 
 func dialRPC(path string) (*rpc.Client, error) {

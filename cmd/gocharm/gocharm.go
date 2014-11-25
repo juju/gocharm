@@ -165,6 +165,7 @@ func (b *charmBuilder) writeHooks(hooks []string) error {
 // The apt-get flags are stolen from github.com/juju/utils/apt
 var hookStubTemplate = template.Must(template.New("").Parse(`#!/bin/sh
 set -ex
+{{if .Source}}
 {{if eq .HookName "install"}}
 apt-get '--option=Dpkg::Options::=--force-confold'  '--option=Dpkg::options::=--force-unsafe-io' --assume-yes --quiet install golang git mercurial
 
@@ -176,11 +177,11 @@ export GOPATH="$CHARM_DIR"
 go get {{.GodepPath}}
 
 "$CHARM_DIR/compile"
-"$CHARM_DIR/bin/runhook" install
-{{else if  .Source}}
+{{else}}
 if test -e "$CHARM_DIR/compile-always"; then
 	"$CHARM_DIR/compile"
 fi
+{{end}}
 {{end}}
 $CHARM_DIR/bin/runhook {{.HookName}}
 `))
