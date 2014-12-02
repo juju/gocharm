@@ -1,0 +1,5 @@
+name: helloworld
+summary: 'a hello world web server'
+description: |
+    This example charm runs a web service that
+    always returns the string "hello, world".
