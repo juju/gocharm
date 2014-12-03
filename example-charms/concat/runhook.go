@@ -35,7 +35,7 @@ func RegisterHooks(r *hook.Registry) {
 		Type:        "string",
 	})
 	var concat concatenator
-	concat.http.Register(r.Clone("httpserver"), "http")
+	concat.http.Register(r.Clone("httpserver"), "http", false)
 	concat.svc.Register(r.Clone("service"), "", startServer)
 
 	r.RegisterContext(concat.setContext, &concat.state)
@@ -106,7 +106,7 @@ func (c *concatenator) changed() error {
 		}
 	}
 	c.newState.Val = fmt.Sprintf("{%s}", strings.Join(vals, " "))
-	c.newState.Port = c.http.Port()
+	c.newState.Port = c.http.HTTPPort()
 	return nil
 }
 
@@ -158,7 +158,7 @@ func (c *concatenator) notifyServer() error {
 	}
 	err := c.svc.Call("ConcatServer.Set", &ServerState{
 		Val:  c.newState.Val,
-		Port: c.http.Port(),
+		Port: c.http.HTTPPort(),
 	}, &struct{}{})
 	if err != nil {
 		return errors.Wrapf(err, "cannot set state in server")

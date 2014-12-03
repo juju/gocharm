@@ -6,6 +6,7 @@
 package httpservice
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -13,6 +14,7 @@ import (
 	"os"
 	"reflect"
 	"strconv"
+	"time"
 
 	"launchpad.net/errgo/errors"
 
@@ -32,9 +34,11 @@ type Service struct {
 }
 
 type localState struct {
-	Port     int
-	Started  bool
-	StartArg string
+	HTTPPort  int
+	HTTPSPort int
+	TLSCert   string
+	Started   bool
+	StartArg  string
 }
 
 // Register registers the service with the given registry.
@@ -57,7 +61,7 @@ func (svc *Service) Register(r *hook.Registry, serviceName, relationName string,
 	}
 	svc.handler = h
 	svc.svc.Register(r.Clone("service"), serviceName, svc.startServer)
-	svc.http.Register(r.Clone("http"), relationName)
+	svc.http.Register(r.Clone("http"), relationName, true)
 	r.RegisterContext(svc.setContext, &svc.state)
 	r.RegisterHook("*", svc.changed)
 }
@@ -68,11 +72,12 @@ func (svc *Service) setContext(ctxt *hook.Context) error {
 }
 
 func (svc *Service) changed() error {
-	port := svc.http.Port()
-	if port == svc.state.Port {
+	httpPort := svc.http.HTTPPort()
+	httpsPort := svc.http.HTTPSPort()
+	if httpPort == svc.state.HTTPPort && httpsPort == svc.state.HTTPSPort {
 		return nil
 	}
-	if port == 0 {
+	if httpPort == 0 && httpsPort == 0 {
 		return svc.svc.Stop()
 	}
 	if err := svc.start(svc.state.StartArg); err != nil {
@@ -99,14 +104,67 @@ func (svc *Service) Start(arg interface{}) error {
 	return nil
 }
 
-func (svc *Service) start(argStr string) error {
-	port := svc.http.Port()
+// PublicHTTPURL returns a URL that can be used to access
+// the HTTP service, not including the trailing slash.
+// TODO https?
+func (svc *Service) PublicHTTPURL() (string, error) {
+	addr, err := svc.ctxt.PublicAddress()
+	if err != nil {
+		return "", errors.Wrapf(err, "cannot get public address")
+	}
+	port := svc.http.HTTPPort()
 	if port == 0 {
+		return "", errors.New("port not currently set")
+	}
+	url := "http://" + addr
+	if port != 80 {
+		url += ":" + strconv.Itoa(port)
+	}
+	return url, nil
+}
+
+var ErrHTTPSNotConfigured = errors.New("HTTPS not configured")
+
+// PublicHTTPSURL returns an http URL that can be
+// used to access the HTTPS service, not including
+// the trailing slash. It returns ErrHTTPSNotConfigured
+// if there is no current https service.
+func (svc *Service) PublicHTTPSURL() (string, error) {
+	_, err := svc.http.TLSCertPEM()
+	if errors.Cause(err) == httprelation.ErrHTTPSNotConfigured {
+		return "", ErrHTTPSNotConfigured
+	}
+	if err != nil {
+		return "", errors.Wrap(err)
+	}
+	port := svc.http.HTTPSPort()
+	if port == 0 {
+		return "", ErrHTTPSNotConfigured
+	}
+	addr, err := svc.ctxt.PublicAddress()
+	if err != nil {
+		return "", errors.Wrapf(err, "cannot get public address")
+	}
+	url := "https://" + addr
+	if port != 443 {
+		url += ":" + strconv.Itoa(port)
+	}
+	return url, nil
+}
+
+func (svc *Service) start(argStr string) error {
+	httpPort := svc.http.HTTPPort()
+	httpsPort := svc.http.HTTPSPort()
+	if httpPort == 0 && httpsPort == 0 {
 		svc.state.StartArg = argStr
 		svc.state.Started = true
 		return nil
 	}
-	if err := svc.svc.Start(strconv.Itoa(port), argStr); err != nil {
+	cert, err := svc.http.TLSCertPEM()
+	if err != nil && errors.Cause(err) != httprelation.ErrHTTPSNotConfigured {
+		return errors.Wrap(err)
+	}
+	if err := svc.svc.Start(strconv.Itoa(httpPort), strconv.Itoa(httpsPort), cert, argStr); err != nil {
 		return errors.Wrap(err)
 	}
 	svc.state.StartArg = argStr
@@ -127,30 +185,88 @@ func (svc *Service) Restart() error {
 	return svc.svc.Restart()
 }
 
+type server struct {
+	handler *handler
+}
+
 func (svc *Service) startServer(ctxt *service.Context, args []string) {
-	if len(args) != 2 {
-		fmt.Fprintf(os.Stderr, "got %d arguments, expected 2\n", len(args))
+	srv := server{
+		handler: svc.handler,
+	}
+	if err := srv.start(ctxt, args); err != nil {
+		fmt.Fprintf(os.Stderr, "%s\n", err)
 		os.Exit(1)
 	}
-	port, err := strconv.Atoi(args[0])
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "invalid port %q", args[0])
+}
+
+func (srv *server) start(ctxt *service.Context, args []string) error {
+	if len(args) != 4 {
+		return errors.Newf("got %d arguments, expected 2", len(args))
 	}
-	h, err := svc.handler.get(args[1])
+	httpPort, err := strconv.Atoi(args[0])
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "cannot get handler: %v", err)
-		os.Exit(2)
+		return errors.Newf("invalid port %q", args[0])
 	}
+	httpsPort, err := strconv.Atoi(args[1])
+	if err != nil {
+		return errors.Newf("invalid port %q", args[1])
+	}
+	certPEM := args[2]
+	h, err := srv.handler.get(args[3])
+	if err != nil {
+		return errors.Newf("cannot get handler: %v", err)
+	}
+	done := make(chan error, 2)
+	if httpPort != 0 {
+		go func() {
+			done <- srv.serveHTTP(httpPort, h)
+		}()
+	}
+	if httpsPort != 0 && certPEM != "" {
+		go func() {
+			done <- srv.serveHTTPS(httpsPort, certPEM, h)
+		}()
+	}
+	return errors.Wrap(<-done)
+}
+
+func (*server) serveHTTP(port int, h http.Handler) error {
 	addr := ":" + strconv.Itoa(port)
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "cannot listen on %s: %v", addr, err)
+		return errors.Newf("cannot listen on %s: %v", addr, err)
 	}
 	server := &http.Server{
 		Addr:    addr,
 		Handler: h,
 	}
-	server.Serve(listener)
+	return server.Serve(listener)
+}
+
+func (*server) serveHTTPS(port int, certPEM string, h http.Handler) error {
+	certPEMBytes := []byte(certPEM)
+	cert, err := tls.X509KeyPair(certPEMBytes, certPEMBytes)
+	if err != nil {
+		return errors.Newf("cannot parse certificate: %v", err)
+	}
+	config := &tls.Config{
+		NextProtos:   []string{"http/1.1"},
+		Certificates: []tls.Certificate{cert},
+	}
+	addr := ":" + strconv.Itoa(port)
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		return errors.Newf("cannot listen on %s: %v", addr, err)
+	}
+	tlsListener := tls.NewListener(
+		tcpKeepAliveListener{listener.(*net.TCPListener)},
+		config,
+	)
+	server := &http.Server{
+		Addr:    addr,
+		Handler: h,
+	}
+	return server.Serve(tlsListener)
 }
 
 type handler struct {
@@ -207,4 +323,24 @@ func (h *handler) marshal(arg interface{}) (string, error) {
 		return "", errors.Wrapf(err, "cannot marshal %#v", arg)
 	}
 	return string(data), nil
+}
+
+// tcpKeepAliveListener is stolen from net/http
+
+// tcpKeepAliveListener sets TCP keep-alive timeouts on accepted
+// connections. It's used by ListenAndServe and ListenAndServeTLS so
+// dead TCP connections (e.g. closing laptop mid-download) eventually
+// go away.
+type tcpKeepAliveListener struct {
+	*net.TCPListener
+}
+
+func (ln tcpKeepAliveListener) Accept() (c net.Conn, err error) {
+	tc, err := ln.AcceptTCP()
+	if err != nil {
+		return
+	}
+	tc.SetKeepAlive(true)
+	tc.SetKeepAlivePeriod(3 * time.Minute)
+	return tc, nil
 }
