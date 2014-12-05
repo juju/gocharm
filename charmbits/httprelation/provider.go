@@ -38,7 +38,7 @@ type Provider struct {
 // The port of the server is configured with the "server-port" charm
 // configuration option.
 func (p *Provider) Register(r *hook.Registry, relationName string, allowHTTPS bool) {
-	p.allowHTTPS = true
+	p.allowHTTPS = allowHTTPS
 	// TODO provide https relation?
 	p.prov.Register(r.Clone("http"), relationName, "http")
 	r.RegisterConfig("http-port", charm.Option{
