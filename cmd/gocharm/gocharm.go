@@ -34,10 +34,6 @@ import (
 	{{.HookPackage | printf "%q"}}
 )
 
-func nop() error {
-	return nil
-}
-
 func main() {
 	r := hook.NewRegistry()
 	charm.RegisterHooks(r)
