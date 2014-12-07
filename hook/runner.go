@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/juju/utils/exec"
-	"launchpad.net/errgo/errors"
+	"gopkg.in/errgo.v1"
 )
 
 // ToolRunner is used to run hook tools.
@@ -50,15 +50,15 @@ func newToolRunnerFromEnvironment() (ToolRunner, error) {
 	}
 	path := os.Getenv(envSocketPath)
 	if path == "" {
-		return nil, errors.New("no juju socket found")
+		return nil, errgo.New("no juju socket found")
 	}
 	contextId := os.Getenv(envJujuContextId)
 	if contextId == "" {
-		return nil, errors.New("no context id found")
+		return nil, errgo.New("no context id found")
 	}
 	client, err := rpc.Dial("unix", os.Getenv(envSocketPath))
 	if err != nil {
-		return nil, errors.Newf("cannot dial uniter: %v", err)
+		return nil, errgo.Newf("cannot dial uniter: %v", err)
 	}
 	return &socketToolRunner{
 		contextId:   contextId,
@@ -90,18 +90,18 @@ func (r *socketToolRunner) Run(cmd string, args ...string) (stdout []byte, err e
 	var resp exec.ExecResponse
 	err = r.jujucClient.Call("Jujuc.Main", req, &resp)
 	if err != nil {
-		return nil, errors.Newf("cannot call jujuc.Main: %v", err)
+		return nil, errgo.Newf("cannot call jujuc.Main: %v", err)
 	}
 	if resp.Code == 0 {
 		return resp.Stdout, nil
 	}
 	errText := strings.TrimSpace(string(resp.Stderr))
 	errText = strings.TrimPrefix(errText, "error: ")
-	return nil, errors.New(errText)
+	return nil, errgo.New(errText)
 }
 
 func (r *socketToolRunner) Close() error {
-	return errors.Wrap(r.jujucClient.Close())
+	return errgo.Mask(r.jujucClient.Close())
 }
 
 type execToolRunner struct{}
@@ -121,7 +121,7 @@ func (execToolRunner) Run(cmd string, args ...string) ([]byte, error) {
 		if errBuf.Len() > 0 {
 			errText := strings.TrimSpace(errBuf.String())
 			errText = strings.TrimPrefix(errText, "error: ")
-			return nil, errors.New(errText)
+			return nil, errgo.New(errText)
 		}
 		return nil, err
 	}

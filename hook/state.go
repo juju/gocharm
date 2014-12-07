@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"launchpad.net/errgo/errors"
+	"gopkg.in/errgo.v1"
 )
 
 // TODO should we add a CleanUp or Remove method on
@@ -40,10 +40,10 @@ func NewDiskState(dir string) PersistentState {
 // Save implements PersistentState.Save.
 func (s *diskState) Save(name string, data []byte) error {
 	if err := os.MkdirAll(s.dir, 0700); err != nil {
-		return errors.Wrap(err)
+		return errgo.Mask(err)
 	}
 	if err := ioutil.WriteFile(s.path(name), data, 0600); err != nil {
-		return errors.Wrap(err)
+		return errgo.Mask(err)
 	}
 	return nil
 }
@@ -55,7 +55,7 @@ func (s *diskState) Load(name string) ([]byte, error) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, errors.Wrap(err)
+		return nil, errgo.Mask(err)
 	}
 	return data, nil
 }

@@ -9,8 +9,8 @@ import (
 	"sort"
 	"strings"
 
+	"gopkg.in/errgo.v1"
 	"gopkg.in/juju/charm.v4"
-	"launchpad.net/errgo/errors"
 
 	"github.com/juju/gocharm/charmbits/httprelation"
 	"github.com/juju/gocharm/charmbits/service"
@@ -87,7 +87,7 @@ func (c *concatenator) changed() error {
 	var vals []string
 	localVal, err := c.ctxt.GetConfigString("val")
 	if err != nil {
-		return errors.Wrap(err)
+		return errgo.Mask(err)
 	}
 	if localVal != "" {
 		vals = append(vals, localVal)
@@ -131,12 +131,12 @@ func (c *concatenator) finally() error {
 	}
 	c.ctxt.Logf("concat state changed from %#v to %#v", c.state, c.newState)
 	if err := c.notifyServer(); err != nil {
-		return errors.Wrap(err)
+		return errgo.Mask(err)
 	}
 	ids := c.ctxt.RelationIds["downstream"]
 	for _, id := range ids {
 		if err := c.setDownstreamVal(id, c.newState.Val); err != nil {
-			return errors.Wrapf(err, "cannot set relation %v", id)
+			return errgo.Notef(err, "cannot set relation %v", id)
 		}
 	}
 	// We've succeeded in notifying everything of the changes, so
@@ -153,7 +153,7 @@ func (c *concatenator) setDownstreamVal(id hook.RelationId, val string) error {
 func (c *concatenator) notifyServer() error {
 	if !c.svc.Started() {
 		if err := c.svc.Start(c.ctxt.StateDir()); err != nil {
-			return errors.Wrap(err)
+			return errgo.Mask(err)
 		}
 	}
 	err := c.svc.Call("ConcatServer.Set", &ServerState{
@@ -161,7 +161,7 @@ func (c *concatenator) notifyServer() error {
 		Port: c.http.HTTPPort(),
 	}, &struct{}{})
 	if err != nil {
-		return errors.Wrapf(err, "cannot set state in server")
+		return errgo.Notef(err, "cannot set state in server")
 	}
 	return nil
 }

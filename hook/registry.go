@@ -8,9 +8,9 @@ import (
 	"strings"
 
 	"github.com/juju/names"
+	"gopkg.in/errgo.v1"
 	"gopkg.in/juju/charm.v4"
 	"gopkg.in/juju/charm.v4/hooks"
-	"launchpad.net/errgo/errors"
 )
 
 // ContextSetter is the type of a function that can
@@ -81,10 +81,10 @@ func NewRegistry() *Registry {
 // conditions occur, Clone will panic.
 func (r *Registry) Clone(name string) *Registry {
 	if name == "" || strings.Contains(name, ".") || strings.ContainsRune(name, filepath.Separator) {
-		panic(errors.Newf("invalid registry name %q", name))
+		panic(errgo.Newf("invalid registry name %q", name))
 	}
 	if r.clones[name] {
-		panic(errors.Newf("registry name %q registered twice", name))
+		panic(errgo.Newf("registry name %q registered twice", name))
 	}
 	r.clones[name] = true
 	return &Registry{
@@ -141,7 +141,7 @@ func (r *Registry) RegisterContext(setter ContextSetter, state interface{}) {
 		return
 	}
 	if reflect.ValueOf(state).Kind() != reflect.Ptr {
-		panic(errors.Newf("state value is not pointer but type %T", state))
+		panic(errgo.Newf("state value is not pointer but type %T", state))
 	}
 	r.state = append(r.state, localState{
 		registryName: r.name,
@@ -157,7 +157,7 @@ func (r *Registry) RegisterContext(setter ContextSetter, state interface{}) {
 // the command line, without the command name itself.
 func (r *Registry) RegisterCommand(f func(args []string)) {
 	if r.hasCommand {
-		panic(errors.Newf("command registered twice on registry %s", r.name))
+		panic(errgo.Newf("command registered twice on registry %s", r.name))
 	}
 	r.hasCommand = true
 	r.commands[r.name] = f
@@ -188,7 +188,7 @@ func (r *Registry) RegisterRelation(rel charm.Relation) {
 	old, ok := r.relations[rel.Name]
 	if ok {
 		if old != rel {
-			panic(errors.Newf("relation %q is already registered with different details (%#v)", rel.Name, old))
+			panic(errgo.Newf("relation %q is already registered with different details (%#v)", rel.Name, old))
 		}
 		return
 	}
@@ -205,7 +205,7 @@ func (r *Registry) RegisterConfig(name string, opt charm.Option) {
 		return
 	}
 	if old != opt {
-		panic(errors.Newf("configuration option %q is already registered with different details (%#v)", name, old))
+		panic(errgo.Newf("configuration option %q is already registered with different details (%#v)", name, old))
 	}
 }
 

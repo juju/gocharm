@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"text/template"
 
+	"gopkg.in/errgo.v1"
 	"gopkg.in/juju/charm.v4"
-	"launchpad.net/errgo/errors"
 )
 
 func registeredCharmInfo(pkg, tempDir string) (*charmInfo, error) {
@@ -18,21 +18,21 @@ func registeredCharmInfo(pkg, tempDir string) (*charmInfo, error) {
 	inspectExe := filepath.Join(tempDir, "inspect")
 	err := compile(filepath.Join(tempDir, "inspect.go"), inspectExe, code, false)
 	if err != nil {
-		return nil, errors.Wrapf(err, "cannot build hook inspection code")
+		return nil, errgo.Notef(err, "cannot build hook inspection code")
 	}
 	c := exec.Command(inspectExe)
 	var buf bytes.Buffer
 	c.Stdout = &buf
 	c.Stderr = os.Stderr
 	if err := c.Run(); err != nil {
-		return nil, errors.Wrapf(err, "failed to run inspect")
+		return nil, errgo.Notef(err, "failed to run inspect")
 	}
 	var out charmInfo
 	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
-		return nil, errors.Wrapf(err, "cannot unmarshal %q", err)
+		return nil, errgo.Notef(err, "cannot unmarshal %q", err)
 	}
 	if len(out.Hooks) == 0 {
-		return nil, errors.New("no hooks registered")
+		return nil, errgo.New("no hooks registered")
 	}
 	if *verbose {
 		log.Printf("registered hooks: %v", out.Hooks)

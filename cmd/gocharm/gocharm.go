@@ -11,9 +11,9 @@ import (
 	"strings"
 	"text/template"
 
+	"gopkg.in/errgo.v1"
 	"gopkg.in/juju/charm.v4"
 	"gopkg.in/yaml.v1"
-	"launchpad.net/errgo/errors"
 )
 
 const (
@@ -92,35 +92,35 @@ func buildCharm(p buildCharmParams) error {
 	}
 	goFile := filepath.Join(b.charmDir, "src", "runhook", "runhook.go")
 	if err := compile(goFile, exe, code, true); err != nil {
-		return errors.Wrapf(err, "cannot build hooks main package")
+		return errgo.Notef(err, "cannot build hooks main package")
 	}
 	if _, err := os.Stat(exe); err != nil {
-		return errors.New("runhook command not built")
+		return errgo.New("runhook command not built")
 	}
 	info, err := registeredCharmInfo(p.pkg.ImportPath, p.tempDir)
 	if err != nil {
-		return errors.Wrap(err)
+		return errgo.Mask(err)
 	}
 	if err := b.writeHooks(info.Hooks); err != nil {
-		return errors.Wrapf(err, "cannot write hooks to charm")
+		return errgo.Notef(err, "cannot write hooks to charm")
 	}
 	if err := b.writeMeta(info.Relations); err != nil {
-		return errors.Wrapf(err, "cannot write metadata.yaml")
+		return errgo.Notef(err, "cannot write metadata.yaml")
 	}
 	if err := b.writeConfig(info.Config); err != nil {
-		return errors.Wrapf(err, "cannot write config.yaml")
+		return errgo.Notef(err, "cannot write config.yaml")
 	}
 	// Sanity check that the new config files parse correctly.
 	_, err = charm.ReadCharmDir(b.charmDir)
 	if err != nil {
-		return errors.Wrapf(err, "charm will not read correctly; we've broken it, sorry")
+		return errgo.Notef(err, "charm will not read correctly; we've broken it, sorry")
 	}
 	if b.source {
 		if err := b.vendorDeps(); err != nil {
-			return errors.Wrapf(err, "cannot get dependencies")
+			return errgo.Notef(err, "cannot get dependencies")
 		}
 		if err := ioutil.WriteFile(filepath.Join(b.charmDir, "compile"), []byte(compileScript), 0755); err != nil {
-			return errors.Wrap(err)
+			return errgo.Mask(err)
 		}
 	}
 	return nil
@@ -135,11 +135,11 @@ func (b *charmBuilder) writeHooks(hooks []string) error {
 	}
 	hookDir := filepath.Join(b.charmDir, "hooks")
 	if err := os.MkdirAll(hookDir, 0777); err != nil {
-		return errors.Wrapf(err, "failed to make hooks directory")
+		return errgo.Notef(err, "failed to make hooks directory")
 	}
 	infos, err := ioutil.ReadDir(hookDir)
 	if err != nil {
-		return errors.Wrap(err)
+		return errgo.Mask(err)
 	}
 	if *verbose {
 		log.Printf("found %d existing hooks", len(infos))
@@ -151,7 +151,7 @@ func (b *charmBuilder) writeHooks(hooks []string) error {
 			log.Printf("creating hook %s", hookPath)
 		}
 		if err := ioutil.WriteFile(hookPath, b.hookStub(hookName), 0755); err != nil {
-			return errors.Wrap(err)
+			return errgo.Mask(err)
 		}
 	}
 	return nil
@@ -199,12 +199,12 @@ func (b *charmBuilder) hookStub(hookName string) []byte {
 func (b *charmBuilder) writeMeta(relations map[string]charm.Relation) error {
 	metaFile, err := os.Open(filepath.Join(b.pkg.Dir, "metadata.yaml"))
 	if err != nil {
-		return errors.Wrap(err)
+		return errgo.Mask(err)
 	}
 	defer metaFile.Close()
 	meta, err := charm.ReadMeta(metaFile)
 	if err != nil {
-		return errors.Wrapf(err, "cannot read metadata.yaml from %q", b.pkg.Dir)
+		return errgo.Notef(err, "cannot read metadata.yaml from %q", b.pkg.Dir)
 	}
 	// The metadata name must match the directory name otherwise
 	// juju deploy will ignore the charm.
@@ -222,11 +222,11 @@ func (b *charmBuilder) writeMeta(relations map[string]charm.Relation) error {
 		case charm.RolePeer:
 			meta.Peers[name] = rel
 		default:
-			return errors.Newf("unknown role %q in relation", rel.Role)
+			return errgo.Newf("unknown role %q in relation", rel.Role)
 		}
 	}
 	if err := writeYAML(filepath.Join(b.charmDir, "metadata.yaml"), meta); err != nil {
-		return errors.Wrapf(err, "cannot write metadata.yaml")
+		return errgo.Notef(err, "cannot write metadata.yaml")
 	}
 	return nil
 }
@@ -236,11 +236,11 @@ const yamlAutogenComment = "# " + autogenMessage + "\n"
 func writeYAML(file string, val interface{}) error {
 	data, err := yaml.Marshal(val)
 	if err != nil {
-		return errors.Wrapf(err, "cannot marshal YAML")
+		return errgo.Notef(err, "cannot marshal YAML")
 	}
 	data = append([]byte(yamlAutogenComment), data...)
 	if err := ioutil.WriteFile(file, data, 0666); err != nil {
-		return errors.Wrap(err)
+		return errgo.Mask(err)
 	}
 	return nil
 }
@@ -253,7 +253,7 @@ func (b *charmBuilder) writeConfig(config map[string]charm.Option) error {
 	if err := writeYAML(configPath, &charm.Config{
 		Options: config,
 	}); err != nil {
-		return errors.Wrapf(err, "cannot write config.yaml")
+		return errgo.Notef(err, "cannot write config.yaml")
 	}
 	return nil
 }
@@ -267,7 +267,7 @@ func (b *charmBuilder) vendorDeps() error {
 	gitCmd := runCmd(dir, nil, "git", "init")
 	gitCmd.Stdout = nil // We don't want the chat.
 	if err := gitCmd.Run(); err != nil {
-		return errors.Wrapf(err, "cannot git init directory")
+		return errgo.Notef(err, "cannot git init directory")
 	}
 	defer os.RemoveAll(filepath.Join(dir, ".git"))
 	// We put the existing GOPATH at the start so that it doesn't matter that
@@ -276,9 +276,9 @@ func (b *charmBuilder) vendorDeps() error {
 	env := setenv(os.Environ(), "GOPATH="+os.Getenv("GOPATH")+listSep+b.charmDir)
 	if err := runCmd(dir, env, "godep", "save").Run(); err != nil {
 		if isExecNotFound(err) {
-			return errors.Newf("godep executable not found; get it with: go get %s", godepPath)
+			return errgo.Newf("godep executable not found; get it with: go get %s", godepPath)
 		}
-		return errors.Wrap(err)
+		return errgo.Mask(err)
 	}
 	return nil
 }
@@ -320,16 +320,16 @@ func compile(goFile, exeFile string, mainCode []byte, crossCompile bool) error {
 		env = setenv(env, "GOOS=linux")
 	}
 	if err := os.MkdirAll(filepath.Dir(goFile), 0777); err != nil {
-		return errors.Wrap(err)
+		return errgo.Mask(err)
 	}
 	if err := os.MkdirAll(filepath.Dir(exeFile), 0777); err != nil {
-		return errors.Wrap(err)
+		return errgo.Mask(err)
 	}
 	if err := ioutil.WriteFile(goFile, mainCode, 0666); err != nil {
-		return errors.Wrap(err)
+		return errgo.Mask(err)
 	}
 	if err := runCmd("", env, "go", "build", "-o", exeFile, goFile).Run(); err != nil {
-		return errors.Wrapf(err, "failed to build")
+		return errgo.Notef(err, "failed to build")
 	}
 	return nil
 }

@@ -10,11 +10,10 @@ github.com/juju/names	git	4bd61d19a7fce663e2821fe05ddf69f774d444da	2014-11-21T15
 github.com/juju/schema	git	27a52be50766490a6fd3531865095fda6c0eeb6d	2014-07-23T04:23:18Z
 github.com/juju/testing	git	d0fb1a32e1702bda28711881f27c3a255e46ed0d	2014-12-03T16:55:57Z
 github.com/juju/utils	git	37016f78b9989f99222a5e09a26e25db124c1b17	2014-12-05T02:56:08Z
-github.com/loggo/loggo	git	89458b4dc99692bc24efe9c2252d7587f8dc247b	2014-01-28T04:50:37Z
 gopkg.in/check.v1	git	64131543e7896d5bcc6bd5a76287eb75ea96c673	2014-10-24T13:38:53Z
+gopkg.in/errgo.v1	git	81357a83344ddd9f7772884874e5622c2a3da21c	2014-10-13T17:33:38Z
 gopkg.in/juju/charm.v4	git	7ef31c485ccfd7f1f9571d42ef4395bd04dc1006	2014-11-17T17:46:04Z
 gopkg.in/mgo.v2	git	e2e914857713db7497cca2bd7fc0b030fc9cb22d	2014-11-07T14:25:03Z
 gopkg.in/natefinch/npipe.v2	git	0938d701e50e580f5925c773055eb6d6b32a0cbc	2014-10-08T14:43:58Z
 gopkg.in/yaml.v1	git	9f9df34309c04878acc86042b16630b0f696e1de	2014-09-24T16:16:07Z
-launchpad.net/errgo	bzr	roger.peppe@canonical.com-20140324230230-7fbr87t3wjjjyapy	12
 launchpad.net/gnuflag	bzr	roger.peppe@canonical.com-20140716064605-pk32dnmfust02yab	13
