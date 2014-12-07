@@ -2,11 +2,11 @@ package httprelation_test
 
 import (
 	"encoding/json"
-	gc "gopkg.in/check.v1"
 	"sort"
 	"testing"
 
 	jc "github.com/juju/testing/checkers"
+	gc "gopkg.in/check.v1"
 	"gopkg.in/juju/charm.v4"
 
 	"github.com/juju/gocharm/charmbits/httprelation"

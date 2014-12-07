@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"sync"
 
-	"launchpad.net/errgo/errors"
+	"gopkg.in/errgo.v1"
 
 	"github.com/juju/gocharm/charmbits/service"
 )
@@ -69,10 +69,10 @@ func (svc *ConcatServer) Set(p *ServerState, _ *struct{}) error {
 	svc.mu.Lock()
 	defer svc.mu.Unlock()
 	if err := svc.set(*p); err != nil {
-		return errors.Wrapf(err, "canot set server state")
+		return errgo.Notef(err, "canot set server state")
 	}
 	if err := svc.saveState(svc.state); err != nil {
-		return errors.Wrapf(err, "cannot save server state")
+		return errgo.Notef(err, "cannot save server state")
 	}
 	return nil
 }
@@ -93,7 +93,7 @@ func (svc *ConcatServer) set(state ServerState) error {
 		addr := ":" + strconv.Itoa(state.Port)
 		listener, err := net.Listen("tcp", addr)
 		if err != nil {
-			return errors.Wrap(err)
+			return errgo.Mask(err)
 		}
 		svc.listener = listener
 		go func() {
@@ -131,14 +131,14 @@ func (svc *ConcatServer) serveHTTP(w http.ResponseWriter, req *http.Request) {
 func (svc *ConcatServer) saveState(state ServerState) error {
 	data, err := json.Marshal(state)
 	if err != nil {
-		return errors.Wrap(err)
+		return errgo.Mask(err)
 	}
 	path := svc.statePath()
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-		return errors.Wrap(err)
+		return errgo.Mask(err)
 	}
 	if err := ioutil.WriteFile(path, data, 0600); err != nil {
-		return errors.Wrap(err)
+		return errgo.Mask(err)
 	}
 	return nil
 }
@@ -149,11 +149,11 @@ func (svc *ConcatServer) loadState() (ServerState, error) {
 		return ServerState{}, nil
 	}
 	if err != nil {
-		return ServerState{}, errors.Wrap(err)
+		return ServerState{}, errgo.Mask(err)
 	}
 	var state ServerState
 	if err := json.Unmarshal(data, &state); err != nil {
-		return ServerState{}, errors.Wrapf(err, "cannot unmarshal state %q", data)
+		return ServerState{}, errgo.Notef(err, "cannot unmarshal state %q", data)
 	}
 	return state, nil
 }

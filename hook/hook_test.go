@@ -9,8 +9,8 @@ import (
 	"github.com/juju/juju/worker/uniter/context/jujuc"
 	jc "github.com/juju/testing/checkers"
 	gc "gopkg.in/check.v1"
+	"gopkg.in/errgo.v1"
 	"gopkg.in/juju/charm.v4"
-	"launchpad.net/errgo/errors"
 
 	"github.com/juju/gocharm/hook"
 )
@@ -642,7 +642,7 @@ func (errorState) Load(name string) ([]byte, error) {
 }
 
 func (errorState) Save(name string, data []byte) error {
-	return errors.New("save error")
+	return errgo.New("save error")
 }
 
 func (s *HookSuite) TestContextFromEnvironmentUsage(c *gc.C) {
@@ -768,7 +768,7 @@ var latestState = make(map[string]localState)
 func localStateHookFunc(state *localState, name string) func() error {
 	return func() error {
 		if state.Name != name && state.Name != "" {
-			panic(errors.Newf("unexpected name in state: %q; expected %q", state.Name, name))
+			panic(errgo.Newf("unexpected name in state: %q; expected %q", state.Name, name))
 		}
 		state.Name = name
 		state.CallCount++

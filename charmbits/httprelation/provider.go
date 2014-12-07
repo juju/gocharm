@@ -5,8 +5,8 @@ package httprelation
 import (
 	"strconv"
 
+	"gopkg.in/errgo.v1"
 	"gopkg.in/juju/charm.v4"
-	"launchpad.net/errgo/errors"
 
 	"github.com/juju/gocharm/charmbits/simplerelation"
 	"github.com/juju/gocharm/hook"
@@ -83,13 +83,13 @@ func (p *Provider) HTTPSPort() int {
 func (p *Provider) configChanged() error {
 
 	if err := p.configurePort(&p.state.OpenedHTTPPort, "http-port"); err != nil {
-		return errors.Wrap(err)
+		return errgo.Mask(err)
 	}
 	if p.allowHTTPS {
 		// If the TLSCert is invalid, ignore it.
 		if _, err := p.TLSCertPEM(); err == nil {
 			if err := p.configurePort(&p.state.OpenedHTTPSPort, "https-port"); err != nil {
-				return errors.Wrap(err)
+				return errgo.Mask(err)
 			}
 		}
 	}
@@ -101,18 +101,18 @@ func (p *Provider) configChanged() error {
 	}
 	addr, err := p.ctxt.PrivateAddress()
 	if err != nil {
-		return errors.Wrap(err)
+		return errgo.Mask(err)
 	}
 	if err := p.prov.SetValues(map[string]string{
 		"hostname": addr,
 		"port":     strconv.Itoa(p.state.OpenedHTTPPort),
 	}); err != nil {
-		return errors.Wrap(err)
+		return errgo.Mask(err)
 	}
 	return nil
 }
 
-var ErrHTTPSNotConfigured = errors.New("HTTPS not configured")
+var ErrHTTPSNotConfigured = errgo.New("HTTPS not configured")
 
 // TLSCertPEM returns the currently configured server certificate
 // in PEM format. It returns ErrHTTPSNotConfigured if there is no currently
@@ -123,7 +123,7 @@ func (p *Provider) TLSCertPEM() (string, error) {
 	}
 	certPEM, err := p.ctxt.GetConfigString("https-certificate")
 	if err != nil {
-		return "", errors.Wrap(err)
+		return "", errgo.Mask(err)
 	}
 	return certPEM, nil
 }
@@ -131,7 +131,7 @@ func (p *Provider) TLSCertPEM() (string, error) {
 func (p *Provider) configurePort(openedPort *int, configKey string) error {
 	port, err := p.ctxt.GetConfigInt(configKey)
 	if err != nil {
-		return errors.Wrapf(err, "cannot get %s", configKey)
+		return errgo.Notef(err, "cannot get %s", configKey)
 	}
 	if port <= 0 || port >= 65535 {
 		p.ctxt.Logf("ignoring invalid %s %v", configKey, port)
@@ -145,12 +145,12 @@ func (p *Provider) configurePort(openedPort *int, configKey string) error {
 		// Could check actually opened ports here to be
 		// more resilient against previous errors.
 		if err := p.ctxt.ClosePort("tcp", *openedPort); err != nil {
-			return errors.Wrap(err)
+			return errgo.Mask(err)
 		}
 		*openedPort = 0
 	}
 	if err := p.ctxt.OpenPort("tcp", port); err != nil {
-		return errors.Wrap(err)
+		return errgo.Mask(err)
 	}
 	*openedPort = port
 	return nil

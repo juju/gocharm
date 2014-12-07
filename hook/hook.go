@@ -12,7 +12,7 @@ import (
 	"strings"
 
 	"github.com/juju/names"
-	"launchpad.net/errgo/errors"
+	"gopkg.in/errgo.v1"
 )
 
 // RelationId is the type of the id of a relation. A relation with
@@ -153,19 +153,19 @@ func (ctxt *Context) UnitTag() string {
 
 func (ctxt *Context) OpenPort(proto string, port int) error {
 	_, err := ctxt.Runner.Run("open-port", fmt.Sprintf("%d/%s", port, proto))
-	return errors.Wrap(err)
+	return errgo.Mask(err)
 }
 
 func (ctxt *Context) ClosePort(proto string, port int) error {
 	_, err := ctxt.Runner.Run("close-port", fmt.Sprintf("%d/%s", port, proto))
-	return errors.Wrap(err)
+	return errgo.Mask(err)
 }
 
 // PublicAddress returns the public address of the local unit.
 func (ctxt *Context) PublicAddress() (string, error) {
 	out, err := ctxt.Runner.Run("unit-get", "public-address")
 	if err != nil {
-		return "", errors.Wrap(err)
+		return "", errgo.Mask(err)
 	}
 	return strings.TrimSpace(string(out)), nil
 }
@@ -174,7 +174,7 @@ func (ctxt *Context) PublicAddress() (string, error) {
 func (ctxt *Context) PrivateAddress() (string, error) {
 	out, err := ctxt.Runner.Run("unit-get", "private-address")
 	if err != nil {
-		return "", errors.Wrap(err)
+		return "", errgo.Mask(err)
 	}
 	return strings.TrimSpace(string(out)), nil
 }
@@ -182,7 +182,7 @@ func (ctxt *Context) PrivateAddress() (string, error) {
 // Log logs a message through the juju logging facility.
 func (ctxt *Context) Logf(f string, a ...interface{}) error {
 	_, err := ctxt.Runner.Run("juju-log", fmt.Sprintf(f, a...))
-	return errors.Wrap(err)
+	return errgo.Mask(err)
 }
 
 // getAllRelationUnit returns all the settings from the given unit associated
@@ -190,7 +190,7 @@ func (ctxt *Context) Logf(f string, a ...interface{}) error {
 func (ctxt *Context) getAllRelationUnit(relationId RelationId, unit UnitId) (map[string]string, error) {
 	var val map[string]string
 	if err := ctxt.runJson(&val, "relation-get", "-r", string(relationId), "--format", "json", "--", "-", string(unit)); err != nil {
-		return nil, errors.Wrap(err)
+		return nil, errgo.Mask(err)
 	}
 	return val, nil
 }
@@ -200,7 +200,7 @@ func (ctxt *Context) getAllRelationUnit(relationId RelationId, unit UnitId) (map
 func (ctxt *Context) relationIds(relationName string) ([]RelationId, error) {
 	var val []RelationId
 	if err := ctxt.runJson(&val, "relation-ids", "--format", "json", "--", relationName); err != nil {
-		return nil, errors.Wrap(err)
+		return nil, errgo.Mask(err)
 	}
 	return val, nil
 }
@@ -209,7 +209,7 @@ func (ctxt *Context) relationIds(relationName string) ([]RelationId, error) {
 func (ctxt *Context) relationUnits(relationId RelationId) ([]UnitId, error) {
 	var val []UnitId
 	if err := ctxt.runJson(&val, "relation-list", "--format", "json", "-r", string(relationId)); err != nil {
-		return nil, errors.Wrap(err)
+		return nil, errgo.Mask(err)
 	}
 	return val, nil
 }
@@ -217,14 +217,14 @@ func (ctxt *Context) relationUnits(relationId RelationId) ([]UnitId, error) {
 // SetRelation sets the given key-value pairs on the current relation instance.
 func (ctxt *Context) SetRelation(keyvals ...string) error {
 	err := ctxt.SetRelationWithId(ctxt.RelationId, keyvals...)
-	return errors.Wrap(err)
+	return errgo.Mask(err)
 }
 
 // SetRelationWithId sets the given key-value pairs
 // on the relation with the given id.
 func (ctxt *Context) SetRelationWithId(relationId RelationId, keyvals ...string) error {
 	if len(keyvals)%2 != 0 {
-		return errors.Newf("invalid key/value count")
+		return errgo.Newf("invalid key/value count")
 	}
 	if len(keyvals) == 0 {
 		return nil
@@ -235,7 +235,7 @@ func (ctxt *Context) SetRelationWithId(relationId RelationId, keyvals ...string)
 		args = append(args, fmt.Sprintf("%s=%s", keyvals[i], keyvals[i+1]))
 	}
 	_, err := ctxt.Runner.Run("relation-set", args...)
-	return errors.Wrap(err)
+	return errgo.Mask(err)
 }
 
 // GetConfig reads the charm configuration value for the given
@@ -246,7 +246,7 @@ func (ctxt *Context) SetRelationWithId(relationId RelationId, keyvals ...string)
 // pass a pointer to a pointer to the desired type.
 func (ctxt *Context) GetConfig(key string, val interface{}) error {
 	if err := ctxt.runJson(val, "config-get", "--format", "json", "--", key); err != nil {
-		return errors.Wrapf(err, "cannot get configuration option %q", key)
+		return errgo.Notef(err, "cannot get configuration option %q", key)
 	}
 	return nil
 }
@@ -257,7 +257,7 @@ func (ctxt *Context) GetConfig(key string, val interface{}) error {
 func (ctxt *Context) GetConfigString(key string) (string, error) {
 	var val string
 	if err := ctxt.GetConfig(key, &val); err != nil {
-		return "", errors.Wrap(err)
+		return "", errgo.Mask(err)
 	}
 	return val, nil
 }
@@ -268,7 +268,7 @@ func (ctxt *Context) GetConfigString(key string) (string, error) {
 func (ctxt *Context) GetConfigInt(key string) (int, error) {
 	var val int
 	if err := ctxt.GetConfig(key, &val); err != nil {
-		return 0, errors.Wrap(err)
+		return 0, errgo.Mask(err)
 	}
 	return val, nil
 }
@@ -279,7 +279,7 @@ func (ctxt *Context) GetConfigInt(key string) (int, error) {
 func (ctxt *Context) GetConfigFloat64(key string) (float64, error) {
 	var val float64
 	if err := ctxt.GetConfig(key, &val); err != nil {
-		return 0, errors.Wrap(err)
+		return 0, errgo.Mask(err)
 	}
 	return val, nil
 }
@@ -290,7 +290,7 @@ func (ctxt *Context) GetConfigFloat64(key string) (float64, error) {
 func (ctxt *Context) GetConfigBool(key string) (bool, error) {
 	var val bool
 	if err := ctxt.GetConfig(key, &val); err != nil {
-		return false, errors.Wrap(err)
+		return false, errgo.Mask(err)
 	}
 	return val, nil
 }
@@ -302,7 +302,7 @@ func (ctxt *Context) GetConfigBool(key string) (bool, error) {
 // value,
 func (ctxt *Context) GetAllConfig(val interface{}) error {
 	if err := ctxt.runJson(&val, "config-get", "--format", "json"); err != nil {
-		return errors.Wrap(err)
+		return errgo.Mask(err)
 	}
 	return nil
 }
@@ -310,10 +310,10 @@ func (ctxt *Context) GetAllConfig(val interface{}) error {
 func (ctxt *Context) runJson(dst interface{}, cmd string, args ...string) error {
 	out, err := ctxt.Runner.Run(cmd, args...)
 	if err != nil {
-		return errors.Wrap(err)
+		return errgo.Mask(err)
 	}
 	if err := json.Unmarshal(out, dst); err != nil {
-		return errors.Wrapf(err, "cannot parse command output %q", out)
+		return errgo.Notef(err, "cannot parse command output %q", out)
 	}
 	return nil
 }

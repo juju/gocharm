@@ -5,7 +5,7 @@ import (
 	"net"
 	"strings"
 
-	"launchpad.net/errgo/errors"
+	"gopkg.in/errgo.v1"
 
 	"github.com/juju/gocharm/charmbits/simplerelation"
 	"github.com/juju/gocharm/hook"
@@ -49,7 +49,7 @@ func unitAddress(vals map[string]string) (string, error) {
 	}
 	port := vals["port"]
 	if port == "" {
-		return "", errors.Newf("mongodb host %q found with no port", host)
+		return "", errgo.Newf("mongodb host %q found with no port", host)
 	}
 	return net.JoinHostPort(host, port), nil
 }

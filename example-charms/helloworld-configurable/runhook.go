@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"net/http"
 
+	"gopkg.in/errgo.v1"
 	"gopkg.in/juju/charm.v4"
-	"launchpad.net/errgo/errors"
 
 	"github.com/juju/gocharm/charmbits/httpservice"
 	"github.com/juju/gocharm/hook"
@@ -37,7 +37,7 @@ func (hw *helloWorld) setContext(ctxt *hook.Context) error {
 func (hw *helloWorld) changed() error {
 	message, err := hw.ctxt.GetConfigString("message")
 	if err != nil {
-		return errors.Wrapf(err, "cannot get message from configuration")
+		return errgo.Notef(err, "cannot get message from configuration")
 	}
 	return hw.svc.Start(&params{
 		Message: message,

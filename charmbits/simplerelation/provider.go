@@ -1,8 +1,8 @@
 package simplerelation
 
 import (
+	"gopkg.in/errgo.v1"
 	"gopkg.in/juju/charm.v4"
-	"launchpad.net/errgo/errors"
 
 	"github.com/juju/gocharm/hook"
 )
@@ -52,7 +52,7 @@ func (p *Provider) SetValues(vals map[string]string) error {
 	// Set the current address in all requirers.
 	for _, id := range p.ctxt.RelationIds[p.relationName] {
 		if err := p.ctxt.SetRelationWithId(id, keyvals...); err != nil {
-			return errors.Wrap(err)
+			return errgo.Mask(err)
 		}
 	}
 	p.state.Values = keyvals
@@ -61,7 +61,7 @@ func (p *Provider) SetValues(vals map[string]string) error {
 
 func (p *Provider) relationJoined() error {
 	if err := p.ctxt.SetRelation(p.state.Values...); err != nil {
-		return errors.Wrap(err)
+		return errgo.Mask(err)
 	}
 	return nil
 }

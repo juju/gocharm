@@ -16,7 +16,7 @@ import (
 	"strconv"
 	"time"
 
-	"launchpad.net/errgo/errors"
+	"gopkg.in/errgo.v1"
 
 	"github.com/juju/gocharm/charmbits/httprelation"
 	"github.com/juju/gocharm/charmbits/service"
@@ -57,7 +57,7 @@ type localState struct {
 func (svc *Service) Register(r *hook.Registry, serviceName, relationName string, handler interface{}) {
 	h, err := newHandler(handler)
 	if err != nil {
-		panic(errors.Wrapf(err, "cannot register handler function"))
+		panic(errgo.Notef(err, "cannot register handler function"))
 	}
 	svc.handler = h
 	svc.svc.Register(r.Clone("service"), serviceName, svc.startServer)
@@ -81,7 +81,7 @@ func (svc *Service) changed() error {
 		return svc.svc.Stop()
 	}
 	if err := svc.start(svc.state.StartArg); err != nil {
-		return errors.Wrap(err)
+		return errgo.Mask(err)
 	}
 	return nil
 }
@@ -96,10 +96,10 @@ func (svc *Service) changed() error {
 func (svc *Service) Start(arg interface{}) error {
 	argStr, err := svc.handler.marshal(arg)
 	if err != nil {
-		return errors.Wrap(err)
+		return errgo.Mask(err)
 	}
 	if err := svc.start(argStr); err != nil {
-		return errors.Wrap(err)
+		return errgo.Mask(err)
 	}
 	return nil
 }
@@ -110,11 +110,11 @@ func (svc *Service) Start(arg interface{}) error {
 func (svc *Service) PublicHTTPURL() (string, error) {
 	addr, err := svc.ctxt.PublicAddress()
 	if err != nil {
-		return "", errors.Wrapf(err, "cannot get public address")
+		return "", errgo.Notef(err, "cannot get public address")
 	}
 	port := svc.http.HTTPPort()
 	if port == 0 {
-		return "", errors.New("port not currently set")
+		return "", errgo.New("port not currently set")
 	}
 	url := "http://" + addr
 	if port != 80 {
@@ -123,7 +123,7 @@ func (svc *Service) PublicHTTPURL() (string, error) {
 	return url, nil
 }
 
-var ErrHTTPSNotConfigured = errors.New("HTTPS not configured")
+var ErrHTTPSNotConfigured = errgo.New("HTTPS not configured")
 
 // PublicHTTPSURL returns an http URL that can be
 // used to access the HTTPS service, not including
@@ -131,11 +131,11 @@ var ErrHTTPSNotConfigured = errors.New("HTTPS not configured")
 // if there is no current https service.
 func (svc *Service) PublicHTTPSURL() (string, error) {
 	_, err := svc.http.TLSCertPEM()
-	if errors.Cause(err) == httprelation.ErrHTTPSNotConfigured {
+	if errgo.Cause(err) == httprelation.ErrHTTPSNotConfigured {
 		return "", ErrHTTPSNotConfigured
 	}
 	if err != nil {
-		return "", errors.Wrap(err)
+		return "", errgo.Mask(err)
 	}
 	port := svc.http.HTTPSPort()
 	if port == 0 {
@@ -143,7 +143,7 @@ func (svc *Service) PublicHTTPSURL() (string, error) {
 	}
 	addr, err := svc.ctxt.PublicAddress()
 	if err != nil {
-		return "", errors.Wrapf(err, "cannot get public address")
+		return "", errgo.Notef(err, "cannot get public address")
 	}
 	url := "https://" + addr
 	if port != 443 {
@@ -161,11 +161,11 @@ func (svc *Service) start(argStr string) error {
 		return nil
 	}
 	cert, err := svc.http.TLSCertPEM()
-	if err != nil && errors.Cause(err) != httprelation.ErrHTTPSNotConfigured {
-		return errors.Wrap(err)
+	if err != nil && errgo.Cause(err) != httprelation.ErrHTTPSNotConfigured {
+		return errgo.Mask(err)
 	}
 	if err := svc.svc.Start(strconv.Itoa(httpPort), strconv.Itoa(httpsPort), cert, argStr); err != nil {
-		return errors.Wrap(err)
+		return errgo.Mask(err)
 	}
 	svc.state.StartArg = argStr
 	return nil
@@ -174,7 +174,7 @@ func (svc *Service) start(argStr string) error {
 // Stop stops the service.
 func (svc *Service) Stop() error {
 	if err := svc.svc.Stop(); err != nil {
-		return errors.Wrap(err)
+		return errgo.Mask(err)
 	}
 	svc.state.Started = false
 	return nil
@@ -201,20 +201,20 @@ func (svc *Service) startServer(ctxt *service.Context, args []string) {
 
 func (srv *server) start(ctxt *service.Context, args []string) error {
 	if len(args) != 4 {
-		return errors.Newf("got %d arguments, expected 2", len(args))
+		return errgo.Newf("got %d arguments, expected 2", len(args))
 	}
 	httpPort, err := strconv.Atoi(args[0])
 	if err != nil {
-		return errors.Newf("invalid port %q", args[0])
+		return errgo.Newf("invalid port %q", args[0])
 	}
 	httpsPort, err := strconv.Atoi(args[1])
 	if err != nil {
-		return errors.Newf("invalid port %q", args[1])
+		return errgo.Newf("invalid port %q", args[1])
 	}
 	certPEM := args[2]
 	h, err := srv.handler.get(args[3])
 	if err != nil {
-		return errors.Newf("cannot get handler: %v", err)
+		return errgo.Newf("cannot get handler: %v", err)
 	}
 	done := make(chan error, 2)
 	if httpPort != 0 {
@@ -227,14 +227,14 @@ func (srv *server) start(ctxt *service.Context, args []string) error {
 			done <- srv.serveHTTPS(httpsPort, certPEM, h)
 		}()
 	}
-	return errors.Wrap(<-done)
+	return errgo.Mask(<-done)
 }
 
 func (*server) serveHTTP(port int, h http.Handler) error {
 	addr := ":" + strconv.Itoa(port)
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
-		return errors.Newf("cannot listen on %s: %v", addr, err)
+		return errgo.Newf("cannot listen on %s: %v", addr, err)
 	}
 	server := &http.Server{
 		Addr:    addr,
@@ -247,7 +247,7 @@ func (*server) serveHTTPS(port int, certPEM string, h http.Handler) error {
 	certPEMBytes := []byte(certPEM)
 	cert, err := tls.X509KeyPair(certPEMBytes, certPEMBytes)
 	if err != nil {
-		return errors.Newf("cannot parse certificate: %v", err)
+		return errgo.Newf("cannot parse certificate: %v", err)
 	}
 	config := &tls.Config{
 		NextProtos:   []string{"http/1.1"},
@@ -256,7 +256,7 @@ func (*server) serveHTTPS(port int, certPEM string, h http.Handler) error {
 	addr := ":" + strconv.Itoa(port)
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
-		return errors.Newf("cannot listen on %s: %v", addr, err)
+		return errgo.Newf("cannot listen on %s: %v", addr, err)
 	}
 	tlsListener := tls.NewListener(
 		tcpKeepAliveListener{listener.(*net.TCPListener)},
@@ -283,16 +283,16 @@ func newHandler(f interface{}) (*handler, error) {
 	fv := reflect.ValueOf(f)
 	ft := fv.Type()
 	if ft.Kind() != reflect.Func {
-		return nil, errors.Newf("bad handler; got %T, expected function", f)
+		return nil, errgo.Newf("bad handler; got %T, expected function", f)
 	}
 	if n := ft.NumIn(); n != 1 {
-		return nil, errors.Newf("bad handler; got %d arguments, expected 1", n)
+		return nil, errgo.Newf("bad handler; got %d arguments, expected 1", n)
 	}
 	if n := ft.NumOut(); n != 2 {
-		return nil, errors.Newf("bad handler; got %d return values, expected 2", n)
+		return nil, errgo.Newf("bad handler; got %d return values, expected 2", n)
 	}
 	if ft.Out(0) != httpHandlerType || ft.Out(1) != errorType {
-		return nil, errors.Newf("bad handler; got return values (%s, %s), expected (http.Handler, error)", ft.Out(0), ft.Out(1))
+		return nil, errgo.Newf("bad handler; got return values (%s, %s), expected (http.Handler, error)", ft.Out(0), ft.Out(1))
 	}
 	return &handler{
 		argType: ft.In(0),
@@ -304,7 +304,7 @@ func (h *handler) get(arg string) (http.Handler, error) {
 	argv := reflect.New(h.argType)
 	err := json.Unmarshal([]byte(arg), argv.Interface())
 	if err != nil {
-		return nil, errors.Wrapf(err, "cannot unmarshal into %s", argv.Type())
+		return nil, errgo.Notef(err, "cannot unmarshal into %s", argv.Type())
 	}
 	r := h.fv.Call([]reflect.Value{argv.Elem()})
 	if err := r[1].Interface(); err != nil {
@@ -316,11 +316,11 @@ func (h *handler) get(arg string) (http.Handler, error) {
 func (h *handler) marshal(arg interface{}) (string, error) {
 	argv := reflect.ValueOf(arg)
 	if argv.Type() != h.argType {
-		return "", errors.Newf("unexpected argument type; got %s, expected %s", argv.Type(), h.argType)
+		return "", errgo.Newf("unexpected argument type; got %s, expected %s", argv.Type(), h.argType)
 	}
 	data, err := json.Marshal(argv.Interface())
 	if err != nil {
-		return "", errors.Wrapf(err, "cannot marshal %#v", arg)
+		return "", errgo.Notef(err, "cannot marshal %#v", arg)
 	}
 	return string(data), nil
 }

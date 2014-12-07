@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"launchpad.net/errgo/errors"
+	"gopkg.in/errgo.v1"
 )
 
 const (
@@ -60,12 +60,12 @@ func Main(r *Registry, ctxt *Context, state PersistentState) (err error) {
 	// Retrieve all persistent state.
 	// TODO read all of the state in one operation from a single file?
 	if err := loadState(r, state); err != nil {
-		return errors.Wrap(err)
+		return errgo.Mask(err)
 	}
 	// Notify everyone about the context.
 	for _, setter := range r.contexts {
 		if err := setter(ctxt); err != nil {
-			return errors.Wrapf(err, "cannot set context")
+			return errgo.Notef(err, "cannot set context")
 		}
 	}
 	defer func() {
@@ -75,7 +75,7 @@ func Main(r *Registry, ctxt *Context, state PersistentState) (err error) {
 			return
 		}
 		if err == nil {
-			err = errors.Wrapf(saveErr, "cannot save local state")
+			err = errgo.Notef(saveErr, "cannot save local state")
 			return
 		}
 		ctxt.Logf("cannot save local state: %v", saveErr)
@@ -94,7 +94,7 @@ func Main(r *Registry, ctxt *Context, state PersistentState) (err error) {
 		if err := f.run(); err != nil {
 			// TODO better error context here, perhaps
 			// including local state name, hook name, etc.
-			return errors.Wrap(err)
+			return errgo.Mask(err)
 		}
 	}
 	return nil
@@ -104,13 +104,13 @@ func loadState(r *Registry, state PersistentState) error {
 	for _, val := range r.state {
 		data, err := state.Load(val.registryName)
 		if err != nil {
-			return errors.Wrapf(err, "cannot load state for %s", val.registryName)
+			return errgo.Notef(err, "cannot load state for %s", val.registryName)
 		}
 		if data == nil {
 			continue
 		}
 		if err := json.Unmarshal(data, val.val); err != nil {
-			return errors.Wrapf(err, "cannot unmarshal state for %s", val.registryName)
+			return errgo.Notef(err, "cannot unmarshal state for %s", val.registryName)
 		}
 	}
 	return nil
@@ -120,10 +120,10 @@ func saveState(r *Registry, state PersistentState) (err error) {
 	for _, val := range r.state {
 		data, err := json.Marshal(val.val)
 		if err != nil {
-			return errors.Wrapf(err, "cannot marshal state for %s", val.registryName)
+			return errgo.Notef(err, "cannot marshal state for %s", val.registryName)
 		}
 		if err := state.Save(val.registryName, data); err != nil {
-			return errors.Wrapf(err, "cannot save state for %s", val.registryName)
+			return errgo.Notef(err, "cannot save state for %s", val.registryName)
 		}
 	}
 	return nil
@@ -139,7 +139,7 @@ func usageError(r *Registry) error {
 	}
 	sort.Strings(allowed[0:len(r.commands)])
 	sort.Strings(allowed[len(r.commands):])
-	return errors.Newf("usage: runhook %s", strings.Join(allowed, "\n\t| runhook "))
+	return errgo.Newf("usage: runhook %s", strings.Join(allowed, "\n\t| runhook "))
 }
 
 func nop() error {
@@ -189,15 +189,15 @@ func NewContextFromEnvironment(r *Registry) (*Context, PersistentState, error) {
 	}
 	for _, v := range vars {
 		if os.Getenv(v) == "" {
-			return nil, nil, errors.Newf("required environment variable %q not set", v)
+			return nil, nil, errgo.Newf("required environment variable %q not set", v)
 		}
 	}
 	if len(os.Args) != 2 {
-		return nil, nil, errors.New("one argument required")
+		return nil, nil, errgo.New("one argument required")
 	}
 	runner, err := newToolRunnerFromEnvironment()
 	if err != nil {
-		return nil, nil, errors.Wrapf(err, "cannot make runner")
+		return nil, nil, errgo.Notef(err, "cannot make runner")
 	}
 	ctxt := &Context{
 		UUID:         os.Getenv(envUUID),
@@ -216,19 +216,19 @@ func NewContextFromEnvironment(r *Registry) (*Context, PersistentState, error) {
 	for name := range r.RegisteredRelations() {
 		ids, err := ctxt.relationIds(name)
 		if err != nil {
-			return nil, nil, errors.Wrapf(err, "cannot get relation ids for relation %q", name)
+			return nil, nil, errgo.Notef(err, "cannot get relation ids for relation %q", name)
 		}
 		ctxt.RelationIds[name] = ids
 		for _, id := range ids {
 			units := make(map[UnitId]map[string]string)
 			unitIds, err := ctxt.relationUnits(id)
 			if err != nil {
-				return nil, nil, errors.Wrapf(err, "cannot get unit ids for relation id %q", id)
+				return nil, nil, errgo.Notef(err, "cannot get unit ids for relation id %q", id)
 			}
 			for _, unitId := range unitIds {
 				settings, err := ctxt.getAllRelationUnit(id, unitId)
 				if err != nil {
-					return nil, nil, errors.Wrapf(err, "cannot get settings for relation %s, unit %s", id, unitId)
+					return nil, nil, errgo.Notef(err, "cannot get settings for relation %s, unit %s", id, unitId)
 				}
 				units[unitId] = settings
 			}

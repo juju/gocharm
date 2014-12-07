@@ -10,7 +10,7 @@ import (
 	"net/rpc/jsonrpc"
 	"os"
 
-	"launchpad.net/errgo/errors"
+	"gopkg.in/errgo.v1"
 )
 
 type serviceParams struct {
@@ -61,13 +61,13 @@ func (ctxt *Context) ServeLocalRPC(rcvr interface{}) error {
 	srv.Register(rcvr)
 	listener, err := listen(ctxt.socketPath)
 	if err != nil {
-		return errors.Wrapf(err, "cannot listen on local socket")
+		return errgo.Notef(err, "cannot listen on local socket")
 	}
 	for {
 		log.Printf("accepting local service on %s", ctxt.socketPath)
 		conn, err := listener.Accept()
 		if err != nil {
-			return errors.Wrapf(err, "local socket accept failed")
+			return errgo.Notef(err, "local socket accept failed")
 		}
 		log.Printf("accepted dial request")
 		go srv.ServeCodec(jsonrpc.NewServerCodec(conn))
@@ -79,7 +79,7 @@ func listen(socketPath string) (net.Listener, error) {
 	os.Remove(socketPath)
 	listener, err := net.Listen("unix", socketPath)
 	if err != nil {
-		return nil, errors.Wrapf(err, "cannot listen on unix socket")
+		return nil, errgo.Notef(err, "cannot listen on unix socket")
 	}
 	return listener, err
 }
