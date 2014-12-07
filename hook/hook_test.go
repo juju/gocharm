@@ -70,6 +70,12 @@ func (s *HookSuite) StartServer(c *gc.C, relid int, remote string) {
 }
 
 func (s *HookSuite) SetUpTest(c *gc.C) {
+	if os.Getenv("TEST_EXEC_HOOK_TOOLS") == "1" {
+		// Run all tests using jujud as a hook tool. This requires a currently installed
+		// jujud executable.
+		*hook.ExecHookTools = true
+		*hook.JujucSymlinks = false
+	}
 	c.Assert(s.savedVars, gc.HasLen, 0)
 	s.savedVars = make(map[string]string)
 	s.savedArgs = os.Args
@@ -859,6 +865,32 @@ func (s *HookSuite) TestHookNotFound(c *gc.C) {
 	err := s.runMain(c, r)
 	c.Assert(err, gc.ErrorMatches, `usage: runhook install
 	\| runhook stop`)
+}
+
+func (s *HookSuite) BenchmarkHook(c *gc.C) {
+	s.StartServer(c, 0, "peer0/0")
+	for i := 0; i < 200; i++ {
+		s.srvCtxt.rels[0].units[fmt.Sprintf("peer0/%d", i)] = Settings{
+			"private-address": fmt.Sprintf("peer0-%d.example.com", i),
+			"foo":             "hello there",
+		}
+	}
+	for i := 0; i < c.N; i++ {
+		r := hook.NewRegistry()
+		r.RegisterHook("install", func() error { return nil })
+		registerDefaultRelations(r)
+		registerSimpleHook(r, "peer0-relation-joined", func(ctxt *hook.Context) error {
+			return nil
+		})
+		r.RegisterHook("stop", func() error { return nil })
+		r.RegisterHook("*", func() error { return nil })
+		os.Args = []string{"exe", "peer0-relation-joined"}
+		ctxt, state, err := hook.NewContextFromEnvironment(r)
+		c.Assert(err, gc.IsNil)
+		err = hook.Main(r, ctxt, state)
+		c.Assert(err, gc.IsNil)
+		ctxt.Close()
+	}
 }
 
 func registerSimpleHook(r *hook.Registry, hookName string, hookFunc func(ctxt *hook.Context) error) {
