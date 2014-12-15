@@ -64,7 +64,7 @@ func (s *providerSuite) testRegister(c *gc.C, withHTTPS bool) {
 
 	hooks := r.RegisteredHooks()
 	sort.Strings(hooks)
-	c.Assert(hooks, jc.DeepEquals, []string{"config-changed", "foo-relation-joined"})
+	c.Assert(hooks, jc.DeepEquals, []string{"config-changed", "foo-relation-joined", "install"})
 }
 
 func (s *providerSuite) TestPortsReturnZeroAtInstallTime(c *gc.C) {

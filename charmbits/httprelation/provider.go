@@ -57,6 +57,7 @@ func (p *Provider) Register(r *hook.Registry, relationName string, allowHTTPS bo
 			Default:     443,
 		})
 	}
+	r.RegisterHook("install", p.configChanged)
 	r.RegisterHook("config-changed", p.configChanged)
 	r.RegisterContext(p.setContext, &p.state)
 }
@@ -81,7 +82,6 @@ func (p *Provider) HTTPSPort() int {
 // HTTPSPort returns the configured port of the HTTPS server.
 // If the port has not been set, or there is no cert provided, it returns 0.
 func (p *Provider) configChanged() error {
-
 	if err := p.configurePort(&p.state.OpenedHTTPPort, "http-port"); err != nil {
 		return errgo.Mask(err)
 	}
