@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/juju/cmd"
-	"github.com/juju/juju/worker/uniter/context/jujuc"
+	"github.com/juju/juju/worker/uniter/runner/jujuc"
 	jc "github.com/juju/testing/checkers"
 	gc "gopkg.in/check.v1"
 	"gopkg.in/errgo.v1"

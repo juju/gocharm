@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/juju/juju/apiserver/params"
-	"github.com/juju/juju/worker/uniter/context/jujuc"
+	"github.com/juju/juju/worker/uniter/runner/jujuc"
 	"github.com/juju/utils/set"
 	. "gopkg.in/check.v1"
 	"gopkg.in/juju/charm.v4"
