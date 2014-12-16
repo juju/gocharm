@@ -1,7 +1,6 @@
 package httprelation_test
 
 import (
-	"encoding/json"
 	"sort"
 	"testing"
 
@@ -118,56 +117,19 @@ type context struct {
 func (ctxt *context) runHook(c *gc.C, hookName string, relId hook.RelationId, relUnit hook.UnitId, register func(*httprelation.Provider, *hook.Registry)) [][]string {
 	var p httprelation.Provider
 
-	r := hook.NewRegistry()
-	p.Register(r, "foo", ctxt.withHTTPS)
-	if register != nil {
-		register(&p, r)
-	}
-	hook.RegisterMainHooks(r)
 	runner := &hooktest.Runner{
-		RunFunc: func(cmd string, args ...string) ([]byte, error) {
-			c.Logf("RunFunc %s %q", cmd, args)
-			if cmd != "config-get" {
-				return nil, nil
+		RegisterHooks: func(r *hook.Registry) {
+			p.Register(r, "foo", ctxt.withHTTPS)
+			if register != nil {
+				register(&p, r)
 			}
-			var val interface{}
-			if len(args) < 4 {
-				val = ctxt.config
-			} else {
-				key := args[3]
-				val = ctxt.config[key]
-			}
-			data, err := json.Marshal(val)
-			c.Assert(err, gc.IsNil)
-			c.Logf("returning %s", data)
-			return data, nil
 		},
-		Logger: c,
-	}
-	hctxt := &hook.Context{
-		UUID:        hooktest.UUID,
-		Unit:        "wordpress/0",
-		CharmDir:    "/nowhere",
-		HookName:    hookName,
-		Runner:      runner,
 		Relations:   ctxt.relations,
 		RelationIds: ctxt.relationIds,
+		Config:      ctxt.config,
+		Logger:      c,
 	}
-	if relId != "" {
-		hctxt.RelationId = relId
-		hctxt.RemoteUnit = relUnit
-	loop:
-		for name, ids := range ctxt.relationIds {
-			for _, id := range ids {
-				if id == hctxt.RelationId {
-					hctxt.RelationName = name
-					break loop
-				}
-			}
-		}
-		c.Assert(hctxt.RelationName, gc.Not(gc.Equals), "")
-	}
-	err := hook.Main(r, hctxt, ctxt.state)
+	err := runner.RunHook(hookName, relId, relUnit)
 	c.Assert(err, gc.IsNil)
 	return runner.Record
 }

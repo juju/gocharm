@@ -13,13 +13,22 @@ import (
 	"path/filepath"
 	"time"
 
-	serviceCommon "github.com/juju/juju/service/common"
-	"github.com/juju/juju/service/upstart"
 	"github.com/juju/utils"
 	"gopkg.in/errgo.v1"
 
 	"github.com/juju/gocharm/hook"
 )
+
+// OSService defines the interface provided by an
+// operating system service. It is implemented by
+// *upstart.Service (from github.com/juju/juju/service/upstart).
+type OSService interface {
+	Install() error
+	StopAndRemove() error
+	Running() bool
+	Stop() error
+	Start() error
+}
 
 // Service represents a long running service that runs
 // outside of the usual charm hook context.
@@ -83,7 +92,7 @@ func (svc *Service) Start(args ...string) error {
 		return errgo.Notef(err, "cannot create state directory")
 	}
 	svc.ctxt.Logf("starting service")
-	usvc := svc.upstartService(args)
+	usvc := svc.osService(args)
 	// Note: Install will restart the service if the configuration
 	// file has changed.
 	if err := usvc.Install(); err != nil {
@@ -102,7 +111,7 @@ func (svc *Service) Start(args ...string) error {
 
 // Stop stops the service running.
 func (svc *Service) Stop() error {
-	if err := svc.upstartService(nil).Stop(); err != nil {
+	if err := svc.osService(nil).Stop(); err != nil {
 		return errgo.Mask(err)
 	}
 	return nil
@@ -110,7 +119,7 @@ func (svc *Service) Stop() error {
 
 // Started reports whether the service has been started.
 func (svc *Service) Started() bool {
-	return svc.upstartService(nil).Running()
+	return svc.osService(nil).Running()
 }
 
 // StopAndRemove stops and removes the service completely.
@@ -118,7 +127,7 @@ func (svc *Service) StopAndRemove() error {
 	if !svc.state.Installed {
 		return nil
 	}
-	if err := svc.upstartService(nil).StopAndRemove(); err != nil {
+	if err := svc.osService(nil).StopAndRemove(); err != nil {
 		return errgo.Mask(err)
 	}
 	svc.state.Installed = false
@@ -160,19 +169,7 @@ func (svc *Service) Call(method string, args interface{}, reply interface{}) err
 	return nil
 }
 
-func dialRPC(path string) (*rpc.Client, error) {
-	c, err := net.Dial("unix", path)
-	if err != nil {
-		return nil, errgo.Mask(err)
-	}
-	return rpc.NewClientWithCodec(jsonrpc.NewClientCodec(c)), nil
-}
-
-func (svc *Service) socketPath() string {
-	return "@" + filepath.Join(svc.ctxt.StateDir(), "service")
-}
-
-func (svc *Service) upstartService(args []string) *upstart.Service {
+func (svc *Service) osService(args []string) OSService {
 	exe := filepath.Join(svc.ctxt.CharmDir, "bin", "runhook")
 	serviceName := svc.serviceName
 	if serviceName == "" {
@@ -187,16 +184,26 @@ func (svc *Service) upstartService(args []string) *upstart.Service {
 	if err != nil {
 		panic(errgo.Notef(err, "cannot marshal parameters"))
 	}
-	cmd := exe + " " +
-		svc.ctxt.CommandName() + " " +
-		base64.StdEncoding.EncodeToString(pdata)
-	return &upstart.Service{
-		Name: serviceName,
-		Conf: serviceCommon.Conf{
-			InitDir: "/etc/init",
-			Desc:    fmt.Sprintf("service for juju unit %q", svc.ctxt.Unit),
-			Cmd:     cmd,
-			Out:     filepath.Join(svc.ctxt.StateDir(), "servicelog.out"),
+	return NewService(OSServiceParams{
+		Name:        serviceName,
+		Description: fmt.Sprintf("service for juju unit %q", svc.ctxt.Unit),
+		Exe:         exe,
+		Args: []string{
+			svc.ctxt.CommandName(),
+			base64.StdEncoding.EncodeToString(pdata),
 		},
+		Output: filepath.Join(svc.ctxt.StateDir(), "servicelog.out"),
+	})
+}
+
+func dialRPC(path string) (*rpc.Client, error) {
+	c, err := net.Dial("unix", path)
+	if err != nil {
+		return nil, errgo.Mask(err)
 	}
+	return rpc.NewClientWithCodec(jsonrpc.NewClientCodec(c)), nil
+}
+
+func (svc *Service) socketPath() string {
+	return "@" + filepath.Join(svc.ctxt.StateDir(), "service")
 }
