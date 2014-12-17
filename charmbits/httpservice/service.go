@@ -71,6 +71,18 @@ func (svc *Service) setContext(ctxt *hook.Context) error {
 	return nil
 }
 
+// HTTPPort returns the currently configured HTTP port
+// for the service.
+func (svc *Service) HTTPPort() int {
+	return svc.http.HTTPPort()
+}
+
+// HTTPSPort returns the currently configured HTTPS port
+// for the service.
+func (svc *Service) HTTPSPort() int {
+	return svc.http.HTTPSPort()
+}
+
 func (svc *Service) changed() error {
 	httpPort := svc.http.HTTPPort()
 	httpsPort := svc.http.HTTPSPort()
