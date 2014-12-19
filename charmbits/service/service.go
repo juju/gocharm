@@ -52,6 +52,11 @@ type localState struct {
 // with the context for the running service and any arguments
 // that were passed to the Service.Start method.
 // When the start function returns, the service will exit.
+//
+// Note that when the start function is called, the hook context
+// will not be available, as at that point the hook will be
+// running in the context of the OS-provided service runner
+// (e.g. upstart).
 func (svc *Service) Register(r *hook.Registry, serviceName string, start func(ctxt *Context, args []string)) {
 	if start == nil {
 		panic("nil start function passed to Service.Register")

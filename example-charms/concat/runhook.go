@@ -1,7 +1,33 @@
-// The concat package implements a
-// charm that takes all the string values from units on upstream
-// relations, concatenates them and makes them available to downstream
-// relations.
+// The concat package implements a charm that takes all the string
+// values from units on upstream relations, concatenates them and makes
+// them available to downstream relations.
+//
+// This provides a silly but simple example that
+// allows the exploration of relation behaviour in Juju.
+//
+// For example, here's an example of this being used from the juju-utils repository:
+//     JUJU_REPOSITORY=$GOPATH/src/launchpad.net/juju-utils/cmd/gocharm/example-charms
+//     export JUJU_REPOSITORY
+//     gocharm
+//     juju deploy local:concat concattop
+//     juju deploy local:concat concat1
+//     juju deploy local:concat concat2
+//     juju deploy local:concat concatjoin
+//     juju add-relation concattop:downstream concat1:upstream
+//     juju add-relation concattop:downstream concat2:upstream
+//     juju add-relation concat1:downstream concatjoin:upstream
+//     juju add-relation concat2:downstream concatjoin:upstream
+//     juju set concattop 'val=top'
+//     juju set concat1 'val=concat1'
+//     juju set concat2 'val=concat2'
+//     juju set concatjoin 'val=concatjoin'
+//
+// The final value of the downstream relation provided by
+// by the concatjoin service in this case will be:
+//
+//     {concatjoin {concat2 {top}} {concat1 {top}}}
+//
+// Feedback loops can be arranged for further amusement.
 package concat
 
 import (

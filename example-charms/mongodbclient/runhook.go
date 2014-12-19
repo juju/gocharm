@@ -1,3 +1,8 @@
+// The mongodbclient package implements an example charm that
+// acts as the client of the mongodb charm. Note that
+// a real charm that used this would pass the mongo
+// URL to a service that would make the actual connection
+// to mongo.
 package mongodbclient
 
 import (
@@ -23,6 +28,6 @@ func (c *charm) setContext(ctxt *hook.Context) error {
 }
 
 func (c *charm) changed() error {
-	c.ctxt.Logf("mongo addresses are now %q", c.mongodb.Addresses())
+	c.ctxt.Logf("mongo URL is now %q", c.mongodb.URL())
 	return nil
 }

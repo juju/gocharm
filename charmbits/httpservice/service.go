@@ -54,6 +54,10 @@ type localState struct {
 // for some type T that can be marshaled as JSON.
 // When the service is started, this function will be called
 // with the arguments provided to the Start method.
+//
+// Note that the handler function will not be called with
+// any hook context available, as it is run by the OS-provided
+// service runner (e.g. upstart).
 func (svc *Service) Register(r *hook.Registry, serviceName, relationName string, handler interface{}) {
 	h, err := newHandler(handler)
 	if err != nil {

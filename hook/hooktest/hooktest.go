@@ -1,3 +1,4 @@
+// Package hooktest contains utilities for testing gocharm hooks.
 package hooktest
 
 import (
