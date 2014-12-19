@@ -1,3 +1,10 @@
+// The helloworld-configurable package implements an example
+// charm similar to http://godoc.org/github.com/juju/gocharm/example-charms/helloworld
+// but which allows the message to be configured, demonstrating how
+// changing configuration options can affect a running service.
+//
+// Once deployed, the message can be changed with:
+// 	juju set helloworld-configurable message='my new message'
 package runhook
 
 import (

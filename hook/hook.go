@@ -1,8 +1,37 @@
 // The hook package provides a Go interface to the
 // Juju charm hook commands. It is designed to be used
-// alongside the gocharm command (github.com/juju/gocharm/cmd/gocharm)
+// alongside the gocharm command.
+// See http://godoc.org/github.com/juju/gocharm/cmd/gocharm .
 //
-// TODO explain more about relations, relation ids and relation units.
+// When a gocharm-compiled Juju hook runs, the first thing that happens
+// is that the RegisterHooks function is called. This is called both when
+// the hook actually runs and when the charm is built, so it is important
+// that code that runs in this context does nothing except register
+// anything that needs to be registered with the provided Registry.
+//
+// Note that it is important that the code runs deterministically - it
+// should not register different hooks or relations depending on the
+// current external environment.
+//
+// Note also that when passing a Registry to some external code, it
+// should be cloned (see the Registry.Clone method) with some locally
+// unique identifier. This identifier has a similar purpose to a field
+// name in a struct - it provides the gocharm logic with a name
+// that it can use to store data associated with registry. At runtime,
+// all local state is stored in the directory /usr/lib/juju-localstate/<env-UUID>.
+// You will see the names provided to Registry.Clone reflected in the
+// names of the files created there.
+//
+// After all hooks, relations and config options have been registered,
+// any functions registered with Registry.SetContext will be called.
+// This provides code with the Context, which is a charm's handle onto
+// the external Juju world.
+//
+// Then any registered hooks will be called in the order that they were
+// registered (except wildcard hooks, which run after any others).
+// This is the time that all your hook logic should do what it needs to,
+// such as maintaining relation settings, reacting to configuration changes,
+// etc.
 package hook
 
 import (
@@ -23,6 +52,7 @@ type RelationId string
 // UnitId is the type of the id of a unit.
 type UnitId string
 
+// Tag returns the juju "tag" name of the unit.
 func (id UnitId) Tag() names.UnitTag {
 	return names.NewUnitTag(string(id))
 }
@@ -141,6 +171,10 @@ func (ctxt *Context) CommandName() string {
 	return "cmd-" + ctxt.registryName
 }
 
+// IsRelationHook reports whether the current hook is executing
+// as a result of a relation change. If it returns true, then
+// ctxt.RelationName, ctxt.RelationId and possibly ctxt.RemoteUnit
+// will be set.
 func (ctxt *Context) IsRelationHook() bool {
 	return ctxt.RelationName != ""
 }
@@ -151,11 +185,15 @@ func (ctxt *Context) UnitTag() string {
 	return names.NewUnitTag(string(ctxt.Unit)).String()
 }
 
+// OpenPort opens the given port using the given protocol ("tcp" or "udp").
+// It if the port is already open, this is a no-op.
 func (ctxt *Context) OpenPort(proto string, port int) error {
 	_, err := ctxt.Runner.Run("open-port", fmt.Sprintf("%d/%s", port, proto))
 	return errgo.Mask(err)
 }
 
+// ClosePort closes the given port associated with the given protocol.
+// If the port is already closed, this is a no-op.
 func (ctxt *Context) ClosePort(proto string, port int) error {
 	_, err := ctxt.Runner.Run("close-port", fmt.Sprintf("%d/%s", port, proto))
 	return errgo.Mask(err)

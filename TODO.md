@@ -19,52 +19,38 @@ charm has been upgraded?
 We could also check local state for backward
 compatibility.
 
-Misc
-----
+Compressed binary support
+----------------------
 
-Use gopkg.in/errgo.v1 package.
+We could support a gzipped executable and uncompress
+at install/upgrade-charm time.
+Given that we are not always guaranteed to call upgrade-charm,
+we should probably compare runhook.gz and runhook binary
+mtimes on every hook execution and uncompress when
+runhook.gz is updated.
 
-Avoid mutation of charms in place
----------------------------
+Testing
+------
 
-Just use normal Go package. Perhaps the package name must be "runhook"
-(along the same lines as "main").
+Support for testing service-based charms.
+Change RegisterCommand so that instead of taking
+a func(args []string), it takes a func(args []string) (Worker, error),
+where: 
 
-	gocharm [-series $series1,$series2...] [-f] [-build architecture] [-vendor] [-godeps] [-name $charmname] $packagepath 
+	type Worker interface {
+		Kill()
+		Wait() error
+	}
 
-Make new charm directory, $d
-
-cp -r $packagepath to $d/src/$packagepath
-
-except for:
-	assets -> $d/assets
-	README.md -> $d/README.md
-	metadata.yaml -> $d/metadata.yaml (with relations added)
-
-runhook.go gets generated and put into $d/runhook.go, importing
-from $packagepath.
-
-runhook gets compiled and put into $d/bin/runhook
-
-We put the resulting charm in $JUJU_REPOSITORY by default.
-If there's anything in the target directory that's not in:
-
-	src/...
-	bin/...
-	assets/...
-	README*
-	metadata.yaml
-	config.yaml
-
-then we abort; otherwise we wipe out everything from the
-target directory and replace it with stuff copied from the charm
-package as specified above.
+This will enable testing code to stop the service that's
+been started (and also potentially allow graceful shutdown
+when the service gets a non-lethal signal)
 
 Support for cross-series / architecture compilation.
 -----------------------------
 
 The default destination charm series should be taken from the current series.
-We should support a -arch flag to compile for other architectures, and
+We should support a -build <architecture> flag to compile for other architectures, and
 have some way for the hooks to know what binary to run
 depending on the host architecture.
 
@@ -80,8 +66,17 @@ Possible for command line flags for the future:
 
 With -deploy, we can just make a repository in /tmp before deploying it to juju.
 
-Naming
+Logging
 ------
 
-Perhaps rename charmbits/*charm to charmbits/*relation
-e.g. httprelation.Provider.
+Integration of service output with charm output might be nice.
+At least some better visisibility of service output would be good.
+
+HTTP service
+----------
+
+We should not pass all the arguments in the upstart
+file and restart every time anything changes. We could
+implement a better scheme that passes
+the arguments through the socket and restarts the server
+only when necessary.
