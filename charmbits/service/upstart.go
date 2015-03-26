@@ -3,8 +3,8 @@ package service
 import (
 	"strings"
 
-	"github.com/juju/juju/service/common"
-	"github.com/juju/juju/service/upstart"
+	"github.com/juju/gocharm/vendored/service/common"
+	"github.com/juju/gocharm/vendored/service/upstart"
 )
 
 // OSServiceParams holds the parameters for
