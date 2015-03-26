@@ -1,0 +1,1 @@
+We've vendored the juju service package in here to avoid depending on juju-core.
