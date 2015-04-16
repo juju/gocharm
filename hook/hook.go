@@ -227,7 +227,7 @@ func (ctxt *Context) Logf(f string, a ...interface{}) error {
 // with the relation with the given id.
 func (ctxt *Context) getAllRelationUnit(relationId RelationId, unit UnitId) (map[string]string, error) {
 	var val map[string]string
-	if err := ctxt.runJson(&val, "relation-get", "-r", string(relationId), "--format", "json", "--", "-", string(unit)); err != nil {
+	if err := ctxt.runJSON(&val, "relation-get", "-r", string(relationId), "--format", "json", "--", "-", string(unit)); err != nil {
 		return nil, errgo.Mask(err)
 	}
 	return val, nil
@@ -237,7 +237,7 @@ func (ctxt *Context) getAllRelationUnit(relationId RelationId, unit UnitId) (map
 // with the relation with the given name.
 func (ctxt *Context) relationIds(relationName string) ([]RelationId, error) {
 	var val []RelationId
-	if err := ctxt.runJson(&val, "relation-ids", "--format", "json", "--", relationName); err != nil {
+	if err := ctxt.runJSON(&val, "relation-ids", "--format", "json", "--", relationName); err != nil {
 		return nil, errgo.Mask(err)
 	}
 	return val, nil
@@ -246,7 +246,7 @@ func (ctxt *Context) relationIds(relationName string) ([]RelationId, error) {
 // relationUnits returns all the units associated with the given relation id.
 func (ctxt *Context) relationUnits(relationId RelationId) ([]UnitId, error) {
 	var val []UnitId
-	if err := ctxt.runJson(&val, "relation-list", "--format", "json", "-r", string(relationId)); err != nil {
+	if err := ctxt.runJSON(&val, "relation-list", "--format", "json", "-r", string(relationId)); err != nil {
 		return nil, errgo.Mask(err)
 	}
 	return val, nil
@@ -283,7 +283,7 @@ func (ctxt *Context) SetRelationWithId(relationId RelationId, keyvals ...string)
 // To find out whether a value has actually been set (is non-null)
 // pass a pointer to a pointer to the desired type.
 func (ctxt *Context) GetConfig(key string, val interface{}) error {
-	if err := ctxt.runJson(val, "config-get", "--format", "json", "--", key); err != nil {
+	if err := ctxt.runJSON(val, "config-get", "--format", "json", "--", key); err != nil {
 		return errgo.Notef(err, "cannot get configuration option %q", key)
 	}
 	return nil
@@ -339,13 +339,30 @@ func (ctxt *Context) GetConfigBool(key string) (bool, error) {
 // what they might be, pass in a pointer to a map[string]interface{}
 // value,
 func (ctxt *Context) GetAllConfig(val interface{}) error {
-	if err := ctxt.runJson(&val, "config-get", "--format", "json"); err != nil {
+	if err := ctxt.runJSON(&val, "config-get", "--format", "json"); err != nil {
 		return errgo.Mask(err)
 	}
 	return nil
 }
 
-func (ctxt *Context) runJson(dst interface{}, cmd string, args ...string) error {
+// Status represents the current status of a charm.
+type Status string
+
+const (
+	StatusMaintenance Status = "maintenance"
+	StatusBlocked     Status = "blocked"
+	StatusWaiting     Status = "waiting"
+	StatusActive      Status = "active"
+)
+
+// SetStatus sets the current status of a charm and an associated
+// message.
+func (ctxt *Context) SetStatus(st Status, message string) error {
+	_, err := ctxt.Runner.Run("status-set", string(st), message)
+	return errgo.Mask(err)
+}
+
+func (ctxt *Context) runJSON(dst interface{}, cmd string, args ...string) error {
 	out, err := ctxt.Runner.Run(cmd, args...)
 	if err != nil {
 		return errgo.Mask(err)

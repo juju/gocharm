@@ -10,7 +10,7 @@ import (
 	jc "github.com/juju/testing/checkers"
 	gc "gopkg.in/check.v1"
 	"gopkg.in/errgo.v1"
-	"gopkg.in/juju/charm.v4"
+	"gopkg.in/juju/charm.v5"
 
 	"github.com/juju/gocharm/hook"
 )
@@ -139,6 +139,19 @@ func (s *HookSuite) TestSimple(c *gc.C) {
 	addr, err = ctxt.PublicAddress()
 	c.Check(err, gc.IsNil)
 	c.Check(addr, gc.Equals, "gimli.minecraft.example.com")
+
+	err = ctxt.SetStatus(hook.StatusMaintenance, "hello, world")
+	c.Check(err, gc.IsNil)
+	c.Check(s.srvCtxt.status, gc.DeepEquals, jujuc.StatusInfo{
+		Status: "maintenance",
+		Info:   "hello, world",
+	})
+
+	err = ctxt.SetStatus(hook.StatusActive, "")
+	c.Check(err, gc.IsNil)
+	c.Check(s.srvCtxt.status, gc.DeepEquals, jujuc.StatusInfo{
+		Status: "active",
+	})
 }
 
 // TODO(rog) test methods that make changes!
