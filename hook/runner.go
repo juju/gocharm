@@ -15,6 +15,8 @@ import (
 type ToolRunner interface {
 	// Run runs the hook tool with the given name
 	// and arguments, and returns its standard output.
+	// If the command is unimplemented, it should
+	// return an error with an ErrUnimplemented cause.
 	Run(cmd string, args ...string) (stdout []byte, err error)
 	Close() error
 }
@@ -78,6 +80,12 @@ type jujucRequest struct {
 	Args        []string
 }
 
+func isUnimplemented(errStr string) bool {
+	return strings.HasPrefix(errStr, "bad request: unknown command")
+}
+
+var ErrUnimplemented = errgo.New("unimplemented hook tool")
+
 func (r *socketToolRunner) Run(cmd string, args ...string) (stdout []byte, err error) {
 	req := jujucRequest{
 		ContextId: r.contextId,
@@ -90,6 +98,9 @@ func (r *socketToolRunner) Run(cmd string, args ...string) (stdout []byte, err e
 	var resp exec.ExecResponse
 	err = r.jujucClient.Call("Jujuc.Main", req, &resp)
 	if err != nil {
+		if isUnimplemented(err.Error()) {
+			return nil, errgo.WithCausef(err, ErrUnimplemented, "")
+		}
 		return nil, errgo.Newf("cannot call jujuc.Main: %v", err)
 	}
 	if resp.Code == 0 {
@@ -121,6 +132,9 @@ func (execToolRunner) Run(cmd string, args ...string) ([]byte, error) {
 		if errBuf.Len() > 0 {
 			errText := strings.TrimSpace(errBuf.String())
 			errText = strings.TrimPrefix(errText, "error: ")
+			if isUnimplemented(errText) {
+				return nil, errgo.WithCausef(nil, ErrUnimplemented, "%s", errText)
+			}
 			return nil, errgo.New(errText)
 		}
 		return nil, err
