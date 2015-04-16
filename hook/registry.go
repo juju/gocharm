@@ -9,8 +9,8 @@ import (
 
 	"github.com/juju/names"
 	"gopkg.in/errgo.v1"
-	"gopkg.in/juju/charm.v4"
-	"gopkg.in/juju/charm.v4/hooks"
+	"gopkg.in/juju/charm.v5"
+	"gopkg.in/juju/charm.v5/hooks"
 )
 
 // ContextSetter is the type of a function that can

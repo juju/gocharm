@@ -15,7 +15,7 @@ import (
 	"github.com/juju/juju/worker/uniter/runner/jujuc"
 	"github.com/juju/utils/set"
 	. "gopkg.in/check.v1"
-	"gopkg.in/juju/charm.v4"
+	"gopkg.in/juju/charm.v5"
 
 	"github.com/juju/gocharm/hook"
 )
@@ -98,6 +98,7 @@ type ServerContext struct {
 	relid  int
 	remote string
 	rels   map[int]*ServerContextRelation
+	status jujuc.StatusInfo
 }
 
 func (s *ServerContext) ActionParams() (map[string]interface{}, error) {
@@ -112,6 +113,11 @@ func (c *ServerContext) OwnerTag() string {
 
 func (c *ServerContext) UnitName() string {
 	return "u/0"
+}
+
+func (c *ServerContext) SetUnitStatus(status jujuc.StatusInfo) error {
+	c.status = status
+	return nil
 }
 
 func (c *ServerContext) PublicAddress() (string, bool) {
@@ -202,7 +208,7 @@ func (r *ServerContextRelation) UnitNames() []string {
 	return s
 }
 
-func (r *ServerContextRelation) ReadSettings(name string) (params.RelationSettings, error) {
+func (r *ServerContextRelation) ReadSettings(name string) (params.Settings, error) {
 	s, found := r.units[name]
 	if !found {
 		return nil, fmt.Errorf("unknown unit %s", name)
@@ -225,7 +231,7 @@ func (s Settings) Delete(k string) {
 	delete(s, k)
 }
 
-func (s Settings) Map() params.RelationSettings {
+func (s Settings) Map() params.Settings {
 	r := map[string]string{}
 	for k, v := range s {
 		r[k] = v

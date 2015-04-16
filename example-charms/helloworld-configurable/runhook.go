@@ -5,7 +5,7 @@ import (
 	"net/http"
 
 	"gopkg.in/errgo.v1"
-	"gopkg.in/juju/charm.v4"
+	"gopkg.in/juju/charm.v5"
 
 	"github.com/juju/gocharm/charmbits/httpservice"
 	"github.com/juju/gocharm/hook"
