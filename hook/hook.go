@@ -318,9 +318,14 @@ const (
 )
 
 // SetStatus sets the current status of a charm and an associated
-// message.
+// message. If the status cannot be set because we are
+// using a version of juju that does not yet support it,
+// that error will be silently discarded.
 func (ctxt *Context) SetStatus(st Status, message string) error {
 	_, err := ctxt.Runner.Run("status-set", string(st), message)
+	if errgo.Cause(err) == ErrUnimplemented {
+		return nil
+	}
 	return errgo.Mask(err)
 }
 

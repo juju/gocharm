@@ -701,6 +701,14 @@ func (s *HookSuite) TestRegisterContextTwice(c *gc.C) {
 	}, gc.PanicMatches, `RegisterContext called more than once`)
 }
 
+func (s *HookSuite) TestRunUnimplementedCommand(c *gc.C) {
+	s.StartServer(c, 0, "peer0/0")
+	ctxt := s.newContext(c, "config-changed")
+	defer ctxt.Close()
+	_, err := ctxt.Runner.Run("unimplemented-command")
+	c.Assert(errgo.Cause(err), gc.Equals, hook.ErrUnimplemented)
+}
+
 func (s *HookSuite) TestCommandCall(c *gc.C) {
 	s.StartServer(c, 0, "peer0/0")
 
