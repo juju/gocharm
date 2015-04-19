@@ -38,6 +38,7 @@ type localState struct {
 	HTTPSPort int
 	TLSCert   string
 	Started   bool
+	ServiceStarted bool
 	StartArg  string
 }
 
@@ -100,6 +101,11 @@ func (svc *Service) changed() error {
 		return errgo.Mask(err)
 	}
 	return nil
+}
+
+// Started reports whether the service has been started.
+func (svc *Service) ServiceStarted() bool {
+	return svc.state.ServiceStarted
 }
 
 // Start starts the service with the given argument.
@@ -183,6 +189,7 @@ func (svc *Service) start(argStr string) error {
 	if err := svc.svc.Start(strconv.Itoa(httpPort), strconv.Itoa(httpsPort), cert, argStr); err != nil {
 		return errgo.Mask(err)
 	}
+	svc.state.ServiceStarted = true
 	svc.state.StartArg = argStr
 	return nil
 }
@@ -193,6 +200,7 @@ func (svc *Service) Stop() error {
 		return errgo.Mask(err)
 	}
 	svc.state.Started = false
+	svc.state.ServiceStarted = false
 	return nil
 }
 
@@ -320,7 +328,7 @@ func (h *handler) get(arg string) (http.Handler, error) {
 	argv := reflect.New(h.argType)
 	err := json.Unmarshal([]byte(arg), argv.Interface())
 	if err != nil {
-		return nil, errgo.Notef(err, "cannot unmarshal into %s", argv.Type())
+		return nil, errgo.Notef(err, "cannot unmarshal %s into %s", arg, argv.Type())
 	}
 	r := h.fv.Call([]reflect.Value{argv.Elem()})
 	if err := r[1].Interface(); err != nil {
