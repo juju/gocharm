@@ -59,7 +59,7 @@ package main
 
 import (
 	"encoding/json"
-	"gopkg.in/juju/charm.v4"
+	"gopkg.in/juju/charm.v5"
 	"os"
 
 	inspect {{.CharmPackage | printf "%q"}}
