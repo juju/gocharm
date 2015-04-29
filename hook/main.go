@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"gopkg.in/errgo.v1"
+	"gopkg.in/juju/charm.v5/hooks"
 )
 
 const (
@@ -187,7 +188,7 @@ func NewContextFromEnvironment(r *Registry) (*Context, PersistentState, error) {
 	vars := mustEnvVars
 	if os.Getenv(envRelationName) != "" {
 		vars = append(vars, relationEnvVars...)
-		if !strings.HasSuffix(hookName, "-relation-broken") {
+		if !strings.HasSuffix(hookName, "-"+string(hooks.RelationBroken)) {
 			vars = append(vars, envRemoteUnit)
 		}
 	}
