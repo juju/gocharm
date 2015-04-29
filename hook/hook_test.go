@@ -85,10 +85,7 @@ func (s *HookSuite) SetUpTest(c *gc.C) {
 }
 
 func (s *HookSuite) TearDownTest(c *gc.C) {
-	for key, val := range s.savedVars {
-		os.Setenv(key, val)
-		delete(s.savedVars, key)
-	}
+	s.resetEnv(c)
 	if s.server != nil {
 		s.server.Close()
 		c.Assert(<-s.err, gc.IsNil)
@@ -96,6 +93,13 @@ func (s *HookSuite) TearDownTest(c *gc.C) {
 	}
 	os.Args = s.savedArgs
 	*hook.HookStateDir = s.savedHookStateDir
+}
+
+func (s *HookSuite) resetEnv(c *gc.C) {
+	for key, val := range s.savedVars {
+		os.Setenv(key, val)
+		delete(s.savedVars, key)
+	}
 }
 
 func (s *HookSuite) setenv(key, val string) {
@@ -658,7 +662,7 @@ func (errorState) Save(name string, data []byte) error {
 	return errgo.New("save error")
 }
 
-func (s *HookSuite) TestContextFromEnvironmentUsage(c *gc.C) {
+func (s *HookSuite) TestNewContextFromEnvironmentUsage(c *gc.C) {
 	r := hook.NewRegistry()
 	r.RegisterCommand(func([]string) {})
 	r.Clone("client").RegisterCommand(func([]string) {})
