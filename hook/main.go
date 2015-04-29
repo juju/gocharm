@@ -32,7 +32,8 @@ var mustEnvVars = []string{
 var relationEnvVars = []string{
 	envRelationName,
 	envRelationId,
-	envRemoteUnit,
+	// Note that envRemoteUnit is not guaranteed
+	// to be set for relation-broken hooks.
 }
 
 // Main creates a new context from the environment and invokes the
@@ -186,6 +187,9 @@ func NewContextFromEnvironment(r *Registry) (*Context, PersistentState, error) {
 	vars := mustEnvVars
 	if os.Getenv(envRelationName) != "" {
 		vars = append(vars, relationEnvVars...)
+		if !strings.HasSuffix(hookName, "-relation-broken") {
+			vars = append(vars, envRemoteUnit)
+		}
 	}
 	for _, v := range vars {
 		if os.Getenv(v) == "" {
