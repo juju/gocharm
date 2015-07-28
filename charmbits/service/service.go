@@ -3,6 +3,7 @@
 package service
 
 import (
+	"crypto/sha1"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -36,7 +37,6 @@ type Service struct {
 	ctxt        *hook.Context
 	serviceName string
 	state       localState
-	rpcClient   *rpc.Client
 }
 
 type localState struct {
@@ -94,6 +94,7 @@ func (svc *Service) Restart() error {
 // time it was started, it will be stopped and then
 // started again with the new arguments.
 func (svc *Service) Start(args ...string) error {
+	svc.ctxt.Logf("service start with args %q", args)
 	// Create the state directory in preparation for the log output.
 	if err := os.MkdirAll(svc.ctxt.StateDir(), 0700); err != nil {
 		return errgo.Notef(err, "cannot create state directory")
@@ -149,27 +150,26 @@ var shortAttempt = utils.AttemptStrategy{
 // Call invokes a method on the service. See rpc.Client.Call for
 // the full semantics.
 func (svc *Service) Call(method string, args interface{}, reply interface{}) error {
-	if svc.rpcClient == nil {
-		if !svc.state.Installed {
-			return errgo.New("service is not started")
-		}
-		svc.ctxt.Logf("dialing rpc server on %s", svc.socketPath())
-		// The service may be notionally started not be actually
-		// running yet, so try for a short while if it fails.
-		for a := shortAttempt.Start(); a.Next(); {
-			c, err := dialRPC(svc.socketPath())
-			if err == nil {
-				svc.rpcClient = c
-				break
-			}
-			if !a.HasNext() {
-				return errgo.Notef(err, "cannot dial %q", svc.socketPath())
-			}
-		}
-		svc.ctxt.Logf("dial succeeded")
+	var rpcClient *rpc.Client
+	if !svc.state.Installed {
+		return errgo.New("service is not started")
 	}
-	svc.ctxt.Logf("calling rpc client")
-	err := svc.rpcClient.Call(method, args, reply)
+	svc.ctxt.Logf("dialing rpc server on %s", svc.socketPath())
+	// The service may be notionally started not be actually
+	// running yet, so try for a short while if it fails.
+	for a := shortAttempt.Start(); a.Next(); {
+		c, err := dialRPC(svc.socketPath())
+		if err == nil {
+			rpcClient = c
+			defer rpcClient.Close()
+			break
+		}
+		if !a.HasNext() {
+			return errgo.Notef(err, "cannot dial %q", svc.socketPath())
+		}
+	}
+	svc.ctxt.Logf("dial succeeded")
+	err := rpcClient.Call(method, args, reply)
 	if err != nil {
 		return errgo.Notef(err, "local service call failed")
 	}
@@ -177,6 +177,7 @@ func (svc *Service) Call(method string, args interface{}, reply interface{}) err
 }
 
 func (svc *Service) osService(args []string) OSService {
+	svc.ctxt.Logf("osService with args: %q", args)
 	exe := filepath.Join(svc.ctxt.CharmDir, "bin", "runhook")
 	serviceName := svc.serviceName
 	if serviceName == "" {
@@ -212,5 +213,8 @@ func dialRPC(path string) (*rpc.Client, error) {
 }
 
 func (svc *Service) socketPath() string {
-	return "@" + filepath.Join(svc.ctxt.StateDir(), "service")
+	// Unix has a limit of 108 characters for a unix domain socket path,
+	// so use the SHA1 of the path instead.
+	path := sha1.Sum([]byte(filepath.Join(svc.ctxt.StateDir(), "service")))
+	return fmt.Sprintf("@%x", path[:])
 }

@@ -20,22 +20,15 @@ import (
 // It should be buffered with a size of at least 2.
 func NewServiceFunc(r *Runner, notify chan ServiceEvent) func(service.OSServiceParams) service.OSService {
 	services := &osServices{
-		notify:   notify,
-		runner:   r,
-		services: make(map[string]*osService),
+		notify:    notify,
+		runner:    r,
+		installed: make(map[string]*installedOSService),
 	}
 	return func(p service.OSServiceParams) service.OSService {
-		services.mu.Lock()
-		defer services.mu.Unlock()
-		if svc := services.services[p.Name]; svc != nil {
-			return svc
-		}
-		svc := &osService{
+		return &osService{
 			params:   p,
 			services: services,
 		}
-		services.services[p.Name] = svc
-		return svc
 	}
 }
 
@@ -44,8 +37,8 @@ type osServices struct {
 	runner *Runner
 
 	// mu guards the following fields and services.
-	mu       sync.Mutex
-	services map[string]*osService
+	mu        sync.Mutex
+	installed map[string]*installedOSService
 }
 
 // osService provides a mock implementation of the
@@ -54,15 +47,40 @@ type osService struct {
 	params service.OSServiceParams
 
 	services *osServices
+}
+
+type installedOSService struct {
+	services *osServices
+
+	// params holds the parameters that the service
+	// was installed with.
+	params service.OSServiceParams
 
 	// The following fields are guarded by services.mu.
-
-	// installed holds whether the services has been installed.
-	installed bool
 
 	// When the service is running, cmd holds
 	// the running command.
 	cmd hook.Command
+}
+
+func (isvc *installedOSService) notify(kind ServiceEventKind, err error) {
+	if isvc.services.notify == nil {
+		return
+	}
+	if err != nil {
+		isvc.logf("hooktest: service event %v (err %v)", kind, err)
+	} else {
+		isvc.logf("hooktest: service event %v", kind)
+	}
+	isvc.services.notify <- ServiceEvent{
+		Kind:   kind,
+		Params: isvc.params,
+		Error:  err,
+	}
+}
+
+func (isvc *installedOSService) logf(f string, a ...interface{}) {
+	isvc.services.runner.Logger.Logf(f, a...)
 }
 
 // ServiceEvent represents an event on a service
@@ -73,9 +91,6 @@ type ServiceEvent struct {
 
 	// Params holds the parameters used to create the service,
 	Params service.OSServiceParams
-
-	// Service holds the service itself.
-	Service service.OSService
 
 	// Error holds an error returned from the service's
 	// command. It is valid only for ServiceEventError
@@ -113,16 +128,11 @@ const (
 	ServiceEventRemove
 )
 
-func (svc *osService) notify(kind ServiceEventKind, err error) {
-	if svc.services.notify == nil {
-		return
-	}
-	svc.services.notify <- ServiceEvent{
-		Kind:    kind,
-		Params:  svc.params,
-		Service: svc,
-		Error:   err,
-	}
+// installedService returns the installed service corresponding
+// to svc, or nil if it is not installed.
+// Must be called with svc.services.mu held.
+func (svc *osService) installedService() *installedOSService {
+	return svc.services.installed[svc.params.Name]
 }
 
 // Install implements service.OSService.Install.
@@ -135,11 +145,16 @@ func (svc *osService) Install() error {
 func (svc *osService) install() {
 	svc.services.mu.Lock()
 	defer svc.services.mu.Unlock()
-	if svc.installed {
+	if isvc := svc.services.installed[svc.params.Name]; isvc != nil {
 		return
 	}
-	svc.installed = true
-	svc.notify(ServiceEventInstall, nil)
+	isvc := &installedOSService{
+		services: svc.services,
+		params:   svc.params,
+	}
+	isvc.logf("hooktest: install service %s; exe: %s; args: %q", svc.params.Name, svc.params.Exe, svc.params.Args)
+	isvc.services.installed[svc.params.Name] = isvc
+	isvc.notify(ServiceEventInstall, nil)
 }
 
 // StopAndRemove implements service.OSService.StopAndRemove.
@@ -147,8 +162,10 @@ func (svc *osService) StopAndRemove() error {
 	svc.Stop()
 	svc.services.mu.Lock()
 	defer svc.services.mu.Unlock()
-	svc.installed = false
-	svc.notify(ServiceEventRemove, nil)
+	if isvc := svc.installedService(); isvc != nil {
+		delete(svc.services.installed, svc.params.Name)
+		isvc.notify(ServiceEventRemove, nil)
+	}
 	return nil
 }
 
@@ -156,23 +173,25 @@ func (svc *osService) StopAndRemove() error {
 func (svc *osService) Running() bool {
 	svc.services.mu.Lock()
 	defer svc.services.mu.Unlock()
-	return svc.cmd != nil
+	isvc := svc.installedService()
+	return isvc != nil && isvc.cmd != nil
 }
 
 // Stop implements service.OSService.Stop.
 func (svc *osService) Stop() error {
 	svc.services.mu.Lock()
 	defer svc.services.mu.Unlock()
-	if svc.cmd == nil {
+	isvc := svc.installedService()
+	if isvc == nil || isvc.cmd == nil {
 		return nil
 	}
-	svc.cmd.Kill()
-	err := svc.cmd.Wait()
+	isvc.cmd.Kill()
+	err := isvc.cmd.Wait()
 	if err != nil {
-		svc.notify(ServiceEventError, err)
+		isvc.notify(ServiceEventError, err)
 	}
-	svc.notify(ServiceEventStop, nil)
-	svc.cmd = nil
+	isvc.notify(ServiceEventStop, nil)
+	isvc.cmd = nil
 	return nil
 }
 
@@ -180,37 +199,38 @@ func (svc *osService) Stop() error {
 func (svc *osService) Start() error {
 	svc.services.mu.Lock()
 	defer svc.services.mu.Unlock()
-	if !svc.installed {
+	isvc := svc.installedService()
+	if isvc == nil {
 		return errgo.Newf("service not installed")
 	}
-	if svc.cmd != nil {
+	if isvc.cmd != nil {
 		return nil
 	}
-	cmd, err := svc.services.runner.RunCommand(svc.params.Args[0], svc.params.Args[1:])
+	cmd, err := isvc.services.runner.RunCommand(svc.params.Args[0], svc.params.Args[1:])
 	if err != nil {
-		svc.notify(ServiceEventError, errgo.Notef(err, "command start"))
+		isvc.notify(ServiceEventError, errgo.Notef(err, "command start"))
 		return nil
 	}
-	svc.notify(ServiceEventStart, nil)
+	isvc.notify(ServiceEventStart, nil)
 	if cmd == nil {
-		svc.notify(ServiceEventStop, nil)
+		isvc.notify(ServiceEventStop, nil)
 		return nil
 	}
-	svc.cmd = cmd
+	isvc.cmd = cmd
 	go func() {
 		err := cmd.Wait()
 		if err != nil {
-			svc.notify(ServiceEventError, errgo.Notef(err, "command wait"))
+			isvc.notify(ServiceEventError, errgo.Notef(err, "command wait"))
 		}
-		svc.services.mu.Lock()
-		defer svc.services.mu.Unlock()
-		if svc.cmd != cmd {
+		isvc.services.mu.Lock()
+		defer isvc.services.mu.Unlock()
+		if isvc.cmd != cmd {
 			// The service has been stopped independently
 			// already. We need do nothing more.
 			return
 		}
-		svc.notify(ServiceEventStop, nil)
-		svc.cmd = nil
+		isvc.notify(ServiceEventStop, nil)
+		isvc.cmd = nil
 	}()
 	return nil
 }

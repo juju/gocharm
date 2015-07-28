@@ -115,7 +115,7 @@ func (r *Registry) RegisterHook(name string, f func() error) {
 }
 
 // RegisterContext registers a function that will be called
-// to set up a context before any hook function execution.
+// to set up a context before hook function execution.
 //
 // If state is non-nil, it should hold a pointer to a value
 // that will be used to hold persistent state associated with the

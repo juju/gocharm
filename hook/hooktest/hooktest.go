@@ -49,7 +49,10 @@ type Runner struct {
 	// that the hook tool runs successfully with no output.
 	RunFunc func(string, ...string) ([]byte, error)
 	Record  [][]string
-	Logger  interface {
+
+	// Logger should be set to a logger. The Logf method
+	// will be called when the charm generates log messages.
+	Logger interface {
 		Logf(string, ...interface{})
 	}
 
@@ -75,7 +78,7 @@ func (runner *Runner) RunHook(hookName string, relId hook.RelationId, relUnit ho
 	hctxt := &hook.Context{
 		UUID:         UUID,
 		Unit:         "someunit/0",
-		CharmDir:     "/nowhere",
+		CharmDir:     "/dev/null",
 		HookStateDir: runner.HookStateDir,
 
 		HookName:    hookName,
