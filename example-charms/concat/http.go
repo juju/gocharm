@@ -15,12 +15,13 @@ import (
 	"gopkg.in/errgo.v1"
 
 	"github.com/juju/gocharm/charmbits/service"
+	"github.com/juju/gocharm/hook"
 )
 
 // startServer starts the server running. The
 // actual HTTP server will not start until the
 // initial value and port have been set.
-func startServer(ctxt *service.Context, args []string) {
+func startServer(ctxt *service.Context, args []string) (hook.Command, error) {
 	log.Printf("concat server started %q", args)
 	if len(args) != 1 {
 		fatalf("need exactly one argument, got %q", args)
@@ -36,7 +37,7 @@ func startServer(ctxt *service.Context, args []string) {
 	if err := srv.set(state); err != nil {
 		fatalf("cannot set initial state: %v", err)
 	}
-	ctxt.ServeLocalRPC(srv)
+	return ctxt.ServeLocalRPC(srv)
 }
 
 func fatalf(f string, a ...interface{}) {

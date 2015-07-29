@@ -38,7 +38,7 @@ type Registry struct {
 // are shared across all clones of a Registry.
 type sharedRegistry struct {
 	hooks     map[string][]hookFunc
-	commands  map[string]func([]string)
+	commands  map[string]func([]string) (Command, error)
 	relations map[string]charm.Relation
 	config    map[string]charm.Option
 	contexts  []ContextSetter
@@ -63,7 +63,7 @@ func NewRegistry() *Registry {
 		clones: make(map[string]bool),
 		sharedRegistry: &sharedRegistry{
 			hooks:     make(map[string][]hookFunc),
-			commands:  make(map[string]func([]string)),
+			commands:  make(map[string]func([]string) (Command, error)),
 			relations: make(map[string]charm.Relation),
 			config:    make(map[string]charm.Option),
 		},
@@ -149,13 +149,30 @@ func (r *Registry) RegisterContext(setter ContextSetter, state interface{}) {
 	})
 }
 
+// Command is implemented by running commands
+// that implement long-lived services.
+type Command interface {
+	// Kill requests that the command be stopped.
+	// It may be called concurrently with Wait.
+	Kill()
+
+	// Wait waits for the command to complete and
+	// returns any error encountered when running.
+	Wait() error
+}
+
 // RegisterCommand registers the given function to be called
 // when the hook is invoked with a first argument of "cmd".
 // It will panic if it is called more than once in the same Registry.
-//
 // The function will be called with any extra arguments passed on
 // the command line, without the command name itself.
-func (r *Registry) RegisterCommand(f func(args []string)) {
+//
+// The function may return a nil Command if it completes immediately
+//  or return a Command representing a long-running service.
+//
+// Note that the function will not be called in hook context,
+// so it will not have any of the usual hook context to use.
+func (r *Registry) RegisterCommand(f func(args []string) (Command, error)) {
 	if r.hasCommand {
 		panic(errgo.Newf("command registered twice on registry %s", r.name))
 	}

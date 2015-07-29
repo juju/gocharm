@@ -41,33 +41,36 @@ var relationEnvVars = []string{
 // appropriate command or hook functions from the given
 // registry or sub-registries of it.
 //
+// If a long-lived command is started, Main returns it rather
+// than waiting for it to complete. This makes it possible
+// to run command functions in tests.
+//
 // The ctxt value holds the context that will be passed
 // to the hooks; the state value is used to retrieve
 // and save persistent state.
 //
 // This function is designed to be called by gocharm
-// generated code only.
-func Main(r *Registry, ctxt *Context, state PersistentState) (err error) {
+// generated code and tests only.
+func Main(r *Registry, ctxt *Context, state PersistentState) (_ Command, err error) {
 	if ctxt.RunCommandName != "" {
 		log.Printf("running command %q %q", ctxt.RunCommandName, ctxt.RunCommandArgs)
 		cmd := r.commands[ctxt.RunCommandName]
 		if cmd == nil {
-			return usageError(r)
+			return nil, usageError(r)
 		}
-		cmd(ctxt.RunCommandArgs)
-		return nil
+		return cmd(ctxt.RunCommandArgs)
 	}
 	ctxt.Logf("running hook %s {", ctxt.HookName)
 	defer ctxt.Logf("} %s", ctxt.HookName)
 	// Retrieve all persistent state.
 	// TODO read all of the state in one operation from a single file?
 	if err := loadState(r, state); err != nil {
-		return errgo.Mask(err)
+		return nil, errgo.Mask(err)
 	}
 	// Notify everyone about the context.
 	for _, setter := range r.contexts {
 		if err := setter(ctxt); err != nil {
-			return errgo.Notef(err, "cannot set context")
+			return nil, errgo.Notef(err, "cannot set context")
 		}
 	}
 	defer func() {
@@ -89,17 +92,17 @@ func Main(r *Registry, ctxt *Context, state PersistentState) (err error) {
 
 	if len(hookFuncs) == 0 {
 		ctxt.Logf("hook %q not registered", ctxt.HookName)
-		return usageError(r)
+		return nil, usageError(r)
 	}
 	hookFuncs = append(hookFuncs, r.hooks["*"]...)
 	for _, f := range hookFuncs {
 		if err := f.run(); err != nil {
 			// TODO better error context here, perhaps
 			// including local state name, hook name, etc.
-			return errgo.Mask(err)
+			return nil, errgo.Mask(err)
 		}
 	}
-	return nil
+	return nil, nil
 }
 
 func loadState(r *Registry, state PersistentState) error {
@@ -169,12 +172,14 @@ func RegisterMainHooks(r *Registry) {
 // populate the context, and the given registry to determine which
 // relations to fetch information for.
 //
+// The given directory will be used to save persistent state.
+//
 // It also returns the persistent state associated with the context
 // unless called in a command-running context.
 //
 // The caller is responsible for calling Close on the returned
 // context.
-func NewContextFromEnvironment(r *Registry) (*Context, PersistentState, error) {
+func NewContextFromEnvironment(r *Registry, stateDir string) (*Context, PersistentState, error) {
 	if len(os.Args) < 2 {
 		return nil, nil, usageError(r)
 	}
@@ -213,6 +218,7 @@ func NewContextFromEnvironment(r *Registry) (*Context, PersistentState, error) {
 		RemoteUnit:   UnitId(os.Getenv(envRemoteUnit)),
 		HookName:     hookName,
 		Runner:       runner,
+		HookStateDir: stateDir,
 	}
 
 	// Populate the relation fields of the ContextInfo

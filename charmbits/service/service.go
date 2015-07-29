@@ -51,13 +51,15 @@ type localState struct {
 // When the service is started, the start function will be called
 // with the context for the running service and any arguments
 // that were passed to the Service.Start method.
-// When the start function returns, the service will exit.
+// The start function should return a hook.Command
+// representing the running service. When its Wait method
+// returns, the service will exit.
 //
 // Note that when the start function is called, the hook context
 // will not be available, as at that point the hook will be
 // running in the context of the OS-provided service runner
 // (e.g. upstart).
-func (svc *Service) Register(r *hook.Registry, serviceName string, start func(ctxt *Context, args []string)) {
+func (svc *Service) Register(r *hook.Registry, serviceName string, start func(ctxt *Context, args []string) (hook.Command, error)) {
 	if start == nil {
 		panic("nil start function passed to Service.Register")
 	}
@@ -66,8 +68,8 @@ func (svc *Service) Register(r *hook.Registry, serviceName string, start func(ct
 	// TODO Perhaps provide some way to do zero-downtime
 	// upgrades?
 	r.RegisterHook("upgrade-charm", svc.Restart)
-	r.RegisterCommand(func(args []string) {
-		runServer(start, args)
+	r.RegisterCommand(func(args []string) (hook.Command, error) {
+		return runServer(start, args)
 	})
 }
 

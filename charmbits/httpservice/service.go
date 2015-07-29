@@ -8,15 +8,14 @@ package httpservice
 import (
 	"crypto/tls"
 	"encoding/json"
-	"fmt"
 	"net"
 	"net/http"
-	"os"
 	"reflect"
 	"strconv"
 	"time"
 
 	"gopkg.in/errgo.v1"
+	"gopkg.in/tomb.v2"
 
 	"github.com/juju/gocharm/charmbits/httprelation"
 	"github.com/juju/gocharm/charmbits/service"
@@ -34,12 +33,12 @@ type Service struct {
 }
 
 type localState struct {
-	HTTPPort  int
-	HTTPSPort int
-	TLSCert   string
-	Started   bool
+	HTTPPort       int
+	HTTPSPort      int
+	TLSCert        string
+	Started        bool
 	ServiceStarted bool
-	StartArg  string
+	StartArg       string
 }
 
 // Register registers the service with the given registry.
@@ -210,68 +209,102 @@ func (svc *Service) Restart() error {
 }
 
 type server struct {
+	tomb    tomb.Tomb
 	handler *handler
+
+	httpListener  net.Listener
+	httpsListener net.Listener
 }
 
-func (svc *Service) startServer(ctxt *service.Context, args []string) {
+func (svc *Service) startServer(ctxt *service.Context, args []string) (hook.Command, error) {
 	srv := server{
 		handler: svc.handler,
 	}
-	if err := srv.start(ctxt, args); err != nil {
-		fmt.Fprintf(os.Stderr, "%s\n", err)
-		os.Exit(1)
-	}
+	return srv.start(ctxt, args)
 }
 
-func (srv *server) start(ctxt *service.Context, args []string) error {
+func (srv *server) start(ctxt *service.Context, args []string) (hook.Command, error) {
 	if len(args) != 4 {
-		return errgo.Newf("got %d arguments, expected 2", len(args))
+		return nil, errgo.Newf("got %d arguments, expected 4", len(args))
 	}
 	httpPort, err := strconv.Atoi(args[0])
-	if err != nil {
-		return errgo.Newf("invalid port %q", args[0])
+	if err != nil || httpPort < 0 {
+		return nil, errgo.Newf("invalid port %q", args[0])
 	}
 	httpsPort, err := strconv.Atoi(args[1])
-	if err != nil {
-		return errgo.Newf("invalid port %q", args[1])
+	if err != nil || httpsPort < 0 {
+		return nil, errgo.Newf("invalid port %q", args[1])
 	}
 	certPEM := args[2]
 	h, err := srv.handler.get(args[3])
 	if err != nil {
-		return errgo.Newf("cannot get handler: %v", err)
+		return nil, errgo.Newf("cannot get handler: %v", err)
 	}
-	done := make(chan error, 2)
-	if httpPort != 0 {
-		go func() {
-			done <- srv.serveHTTP(httpPort, h)
-		}()
+	httpListener, httpAddr, err := srv.listenHTTP(httpPort)
+	if err != nil {
+		return nil, errgo.Mask(err)
 	}
 	if httpsPort != 0 && certPEM != "" {
-		go func() {
-			done <- srv.serveHTTPS(httpsPort, certPEM, h)
-		}()
+		httpsListener, httpsAddr, err := srv.listenHTTPS(httpsPort, certPEM)
+		if err != nil {
+			httpListener.Close()
+			return nil, errgo.Mask(err)
+		}
+		srv.httpsListener = httpsListener
+		httpsServer := &http.Server{
+			Addr:    httpsAddr,
+			Handler: h,
+		}
+		srv.tomb.Go(func() error {
+			return httpsServer.Serve(httpsListener)
+		})
 	}
-	return errgo.Mask(<-done)
+
+	srv.httpListener = httpListener
+	httpServer := &http.Server{
+		Addr:    httpAddr,
+		Handler: h,
+	}
+	srv.tomb.Go(func() error {
+		return httpServer.Serve(httpListener)
+	})
+	srv.tomb.Go(func() error {
+		<-srv.tomb.Dying()
+		if srv.httpListener != nil {
+			srv.httpListener.Close()
+		}
+		if srv.httpsListener != nil {
+			srv.httpsListener.Close()
+		}
+		return nil
+	})
+	return srv, nil
 }
 
-func (*server) serveHTTP(port int, h http.Handler) error {
+// Kill implements hook.Command.Kill.
+func (srv *server) Kill() {
+	srv.tomb.Kill(nil)
+}
+
+// Wait implements hook.Command.Wait.
+func (srv *server) Wait() error {
+	return srv.tomb.Wait()
+}
+
+func (*server) listenHTTP(port int) (net.Listener, string, error) {
 	addr := ":" + strconv.Itoa(port)
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
-		return errgo.Newf("cannot listen on %s: %v", addr, err)
+		return nil, "", errgo.Newf("cannot listen on %s: %v", addr, err)
 	}
-	server := &http.Server{
-		Addr:    addr,
-		Handler: h,
-	}
-	return server.Serve(listener)
+	return listener, addr, nil
 }
 
-func (*server) serveHTTPS(port int, certPEM string, h http.Handler) error {
+func (*server) listenHTTPS(port int, certPEM string) (net.Listener, string, error) {
 	certPEMBytes := []byte(certPEM)
 	cert, err := tls.X509KeyPair(certPEMBytes, certPEMBytes)
 	if err != nil {
-		return errgo.Newf("cannot parse certificate: %v", err)
+		return nil, "", errgo.Newf("cannot parse certificate: %v", err)
 	}
 	config := &tls.Config{
 		NextProtos:   []string{"http/1.1"},
@@ -280,17 +313,12 @@ func (*server) serveHTTPS(port int, certPEM string, h http.Handler) error {
 	addr := ":" + strconv.Itoa(port)
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
-		return errgo.Newf("cannot listen on %s: %v", addr, err)
+		return nil, "", errgo.Newf("cannot listen on %s: %v", addr, err)
 	}
-	tlsListener := tls.NewListener(
+	return tls.NewListener(
 		tcpKeepAliveListener{listener.(*net.TCPListener)},
 		config,
-	)
-	server := &http.Server{
-		Addr:    addr,
-		Handler: h,
-	}
-	return server.Serve(tlsListener)
+	), addr, nil
 }
 
 type handler struct {

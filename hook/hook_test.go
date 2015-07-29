@@ -16,13 +16,13 @@ import (
 )
 
 type HookSuite struct {
-	sockPath          string
-	srvCtxt           *ServerContext
-	server            *jujuc.Server
-	err               chan error
-	savedVars         map[string]string
-	savedArgs         []string
-	savedHookStateDir string
+	sockPath  string
+	srvCtxt   *ServerContext
+	server    *jujuc.Server
+	err       chan error
+	savedVars map[string]string
+	savedArgs []string
+	stateDir  string
 }
 
 var _ = gc.Suite(&HookSuite{})
@@ -79,9 +79,8 @@ func (s *HookSuite) SetUpTest(c *gc.C) {
 	c.Assert(s.savedVars, gc.HasLen, 0)
 	s.savedVars = make(map[string]string)
 	s.savedArgs = os.Args
+	s.stateDir = c.MkDir()
 	os.Args = nil
-	s.savedHookStateDir = *hook.HookStateDir
-	*hook.HookStateDir = c.MkDir()
 }
 
 func (s *HookSuite) TearDownTest(c *gc.C) {
@@ -92,7 +91,6 @@ func (s *HookSuite) TearDownTest(c *gc.C) {
 		s.server = nil
 	}
 	os.Args = s.savedArgs
-	*hook.HookStateDir = s.savedHookStateDir
 }
 
 func (s *HookSuite) resetEnv(c *gc.C) {
@@ -114,7 +112,7 @@ func (s *HookSuite) newContext(c *gc.C, args ...string) *hook.Context {
 	registerDefaultRelations(r)
 
 	os.Args = append([]string{"runhook"}, args...)
-	ctxt, _, err := hook.NewContextFromEnvironment(r)
+	ctxt, _, err := hook.NewContextFromEnvironment(r, s.stateDir)
 	c.Assert(err, gc.IsNil)
 	return ctxt
 }
@@ -180,11 +178,12 @@ func (s *HookSuite) TestLocalState(c *gc.C) {
 		})
 		r.RegisterContext(nopContextSetter, &state)
 		os.Args = []string{"exe", "peer-relation-changed"}
-		ctxt, pstate, err := hook.NewContextFromEnvironment(r)
+		ctxt, pstate, err := hook.NewContextFromEnvironment(r, s.stateDir)
 		c.Assert(err, gc.IsNil)
 		defer ctxt.Close()
-		err = hook.Main(r, ctxt, pstate)
+		hcmd, err := hook.Main(r, ctxt, pstate)
 		c.Assert(err, gc.IsNil)
+		c.Assert(hcmd, gc.IsNil)
 	}
 	start(func(state *fooState) {
 		c.Assert(state, gc.DeepEquals, &fooState{})
@@ -589,12 +588,13 @@ func (s *HookSuite) TestMain(c *gc.C) {
 	})
 	os.Args = []string{"exe", "peer-relation-changed"}
 
-	ctxt, state, err := hook.NewContextFromEnvironment(r0)
+	ctxt, state, err := hook.NewContextFromEnvironment(r0, s.stateDir)
 	c.Assert(err, gc.IsNil)
 	defer ctxt.Close()
 
-	err = hook.Main(r0, ctxt, state)
+	hcmd, err := hook.Main(r0, ctxt, state)
 	c.Assert(err, gc.IsNil)
+	c.Assert(hcmd, gc.IsNil)
 	c.Assert(called0, gc.Equals, true)
 
 	// Check that when the same hook is invoked again, the
@@ -645,11 +645,12 @@ func (s *HookSuite) TestMainFailsWhenCannotSaveState(c *gc.C) {
 	r.RegisterContext(nopContextSetter, &state)
 	r.RegisterHook("peer-relation-changed", func() error { return nil })
 	os.Args = []string{"exe", "peer-relation-changed"}
-	ctxt, _, err := hook.NewContextFromEnvironment(r)
+	ctxt, _, err := hook.NewContextFromEnvironment(r, s.stateDir)
 	c.Assert(err, gc.IsNil)
 	defer ctxt.Close()
-	err = hook.Main(r, ctxt, errorState{})
+	hcmd, err := hook.Main(r, ctxt, errorState{})
 	c.Assert(err, gc.ErrorMatches, "cannot save local state: cannot save state for root: save error")
+	c.Assert(hcmd, gc.IsNil)
 }
 
 type errorState struct{}
@@ -664,29 +665,33 @@ func (errorState) Save(name string, data []byte) error {
 
 func (s *HookSuite) TestNewContextFromEnvironmentUsage(c *gc.C) {
 	r := hook.NewRegistry()
-	r.RegisterCommand(func([]string) {})
-	r.Clone("client").RegisterCommand(func([]string) {})
+	r.RegisterCommand(nopCommand)
+	r.Clone("client").RegisterCommand(nopCommand)
 	r.RegisterHook("peer-relation-changed", func() error { return nil })
 	r.RegisterHook("config-changed", func() error { return nil })
 	os.Args = []string{"exe"}
-	_, _, err := hook.NewContextFromEnvironment(r)
+	_, _, err := hook.NewContextFromEnvironment(r, s.stateDir)
 	c.Assert(err, gc.ErrorMatches, `usage: runhook cmd-root \[arg\.\.\.]
 	\| runhook cmd-root\.client \[arg\.\.\.]
 	\| runhook config-changed
 	\| runhook peer-relation-changed`)
 }
 
+func nopCommand([]string) (hook.Command, error) {
+	return nil, nil
+}
+
 func (s *HookSuite) TestRegisterCommandTwice(c *gc.C) {
 	r := hook.NewRegistry()
-	r.RegisterCommand(func([]string) {})
+	r.RegisterCommand(nopCommand)
 	c.Assert(func() {
-		r.RegisterCommand(func([]string) {})
+		r.RegisterCommand(nopCommand)
 	}, gc.PanicMatches, `command registered twice on registry root`)
 
 	r1 := r.Clone("foo")
-	r1.RegisterCommand(func([]string) {})
+	r1.RegisterCommand(nopCommand)
 	c.Assert(func() {
-		r1.RegisterCommand(func([]string) {})
+		r1.RegisterCommand(nopCommand)
 	}, gc.PanicMatches, `command registered twice on registry root\.foo`)
 }
 
@@ -718,9 +723,10 @@ func (s *HookSuite) TestCommandCall(c *gc.C) {
 
 	r := hook.NewRegistry()
 	callArgs := make(map[string][]string)
-	cmdFunc := func(name string) func([]string) {
-		return func(args []string) {
+	cmdFunc := func(name string) func([]string) (hook.Command, error) {
+		return func(args []string) (hook.Command, error) {
 			callArgs[name] = append([]string{}, args...)
+			return nil, nil
 		}
 	}
 
@@ -738,22 +744,24 @@ func (s *HookSuite) TestCommandCall(c *gc.C) {
 		return nil
 	})
 	// invoke install hook, so we can find out the
-	// reported command names.,
+	// reported command names.
 	os.Args = []string{"exe", "install"}
 	ctxt := &hook.Context{
 		HookName: "install",
 		Runner:   nopRunner{},
 	}
-	err := hook.Main(r, ctxt, nil)
+	hcmd, err := hook.Main(r, ctxt, nil)
 	c.Assert(err, gc.IsNil)
+	c.Assert(hcmd, gc.IsNil)
 	c.Assert(cmdNames, gc.HasLen, 2)
 
 	for i, name := range cmdNames {
 		os.Args = []string{"exe", name, fmt.Sprint(i), "arg1", "arg2"}
-		ctxt, state, err := hook.NewContextFromEnvironment(r)
+		ctxt, state, err := hook.NewContextFromEnvironment(r, s.stateDir)
 		c.Assert(err, gc.IsNil)
-		err = hook.Main(r, ctxt, state)
+		hcmd, err := hook.Main(r, ctxt, state)
 		c.Assert(err, gc.IsNil)
+		c.Assert(hcmd, gc.IsNil)
 		defer ctxt.Close()
 	}
 
@@ -761,6 +769,48 @@ func (s *HookSuite) TestCommandCall(c *gc.C) {
 		"main":     {"0", "arg1", "arg2"},
 		"main-sub": {"1", "arg1", "arg2"},
 	})
+}
+
+type fakeCommand struct {
+}
+
+func (fakeCommand) Kill() {}
+
+func (fakeCommand) Wait() error {
+	return nil
+}
+
+func (s *HookSuite) TestLongRunningCommand(c *gc.C) {
+	s.StartServer(c, 0, "peer0/0")
+
+	r := hook.NewRegistry()
+	r.RegisterCommand(func(args []string) (hook.Command, error) {
+		return fakeCommand{}, nil
+	})
+	var cmdName string
+	registerSimpleHook(r, "install", func(ctxt *hook.Context) error {
+		cmdName = ctxt.CommandName()
+		return nil
+	})
+
+	// invoke install hook, so we can find out the
+	// reported command name.
+	os.Args = []string{"exe", "install"}
+	ctxt := &hook.Context{
+		HookName: "install",
+		Runner:   nopRunner{},
+	}
+	hcmd, err := hook.Main(r, ctxt, nil)
+	c.Assert(err, gc.IsNil)
+	c.Assert(hcmd, gc.IsNil)
+	c.Assert(cmdName, gc.Not(gc.Equals), "")
+
+	os.Args = []string{"exe", cmdName}
+	ctxt, state, err := hook.NewContextFromEnvironment(r, s.stateDir)
+	c.Assert(err, gc.IsNil)
+	hcmd, err = hook.Main(r, ctxt, state)
+	c.Assert(err, gc.IsNil)
+	c.Assert(hcmd, gc.Equals, fakeCommand{})
 }
 
 var validHookNameTests = map[string]bool{
@@ -838,10 +888,15 @@ func (s memState) Load(name string) ([]byte, error) {
 // runMain runs hook.Main with a context created from the
 // environment.
 func (s *HookSuite) runMain(c *gc.C, r *hook.Registry) error {
-	ctxt, state, err := hook.NewContextFromEnvironment(r)
+	ctxt, state, err := hook.NewContextFromEnvironment(r, s.stateDir)
 	c.Assert(err, gc.IsNil)
 	defer ctxt.Close()
-	return hook.Main(r, ctxt, state)
+	hcmd, err := hook.Main(r, ctxt, state)
+	if err != nil {
+		return err
+	}
+	c.Assert(hcmd, gc.IsNil)
+	return nil
 }
 
 func (s *HookSuite) TestHierarchicalLocalState(c *gc.C) {
@@ -910,9 +965,10 @@ func (s *HookSuite) BenchmarkHook(c *gc.C) {
 		r.RegisterHook("stop", func() error { return nil })
 		r.RegisterHook("*", func() error { return nil })
 		os.Args = []string{"exe", "peer0-relation-joined"}
-		ctxt, state, err := hook.NewContextFromEnvironment(r)
+		ctxt, state, err := hook.NewContextFromEnvironment(r, s.stateDir)
 		c.Assert(err, gc.IsNil)
-		err = hook.Main(r, ctxt, state)
+		hcmd, err := hook.Main(r, ctxt, state)
+		c.Assert(hcmd, gc.IsNil)
 		c.Assert(err, gc.IsNil)
 		ctxt.Close()
 	}
