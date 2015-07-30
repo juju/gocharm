@@ -3,6 +3,9 @@ package hooktest
 
 import (
 	"encoding/json"
+	"strings"
+
+	"gopkg.in/errgo.v1"
 
 	"github.com/juju/gocharm/hook"
 )
@@ -20,6 +23,7 @@ import (
 // and PrivateAddress fields.
 type Runner struct {
 	RegisterHooks func(r *hook.Registry)
+
 	// The following fields hold information that will
 	// be available through the hook context.
 	Relations   map[hook.RelationId]map[hook.UnitId]map[string]string
@@ -28,6 +32,12 @@ type Runner struct {
 
 	PublicAddress  string
 	PrivateAddress string
+
+	// HookStateDir holds the directory in which state
+	// other than hook state will be stored (for instance,
+	// this is used by the service package to store service
+	// logs). If this is empty, RunHook will panic.
+	HookStateDir string
 
 	// State holds the persistent state.
 	// If it is nil, it will be set to a hooktest.MemState
@@ -53,6 +63,9 @@ type Runner struct {
 //
 // Any hook tools that have been run will be stored in r.Record.
 func (runner *Runner) RunHook(hookName string, relId hook.RelationId, relUnit hook.UnitId) error {
+	if runner.HookStateDir == "" {
+		panic("empty hook state dir")
+	}
 	if runner.State == nil {
 		runner.State = make(MemState)
 	}
@@ -60,9 +73,11 @@ func (runner *Runner) RunHook(hookName string, relId hook.RelationId, relUnit ho
 	runner.RegisterHooks(r)
 	hook.RegisterMainHooks(r)
 	hctxt := &hook.Context{
-		UUID:        UUID,
-		Unit:        "someunit/0",
-		CharmDir:    "/nowhere",
+		UUID:         UUID,
+		Unit:         "someunit/0",
+		CharmDir:     "/nowhere",
+		HookStateDir: runner.HookStateDir,
+
 		HookName:    hookName,
 		Runner:      runner,
 		Relations:   runner.Relations,
@@ -84,7 +99,27 @@ func (runner *Runner) RunHook(hookName string, relId hook.RelationId, relUnit ho
 			panic("relation id not found")
 		}
 	}
-	return hook.Main(r, hctxt, runner.State)
+	c, err := hook.Main(r, hctxt, runner.State)
+	if c != nil {
+		panic(errgo.Newf("non-command hook returned Command"))
+	}
+	return err
+}
+
+// RunCommand runs the given command in the context of the Runner.
+// The cmdName should be a name returned by hook.Context.CommandName.
+func (runner *Runner) RunCommand(cmdName string, args []string) (hook.Command, error) {
+	if !strings.HasPrefix(cmdName, "cmd-") {
+		panic(errgo.Newf(`command name %q does not have "cmd-" prefix`, cmdName))
+	}
+	r := hook.NewRegistry()
+	runner.RegisterHooks(r)
+	hook.RegisterMainHooks(r)
+	hctxt := &hook.Context{
+		RunCommandName: strings.TrimPrefix(cmdName, "cmd-"),
+		RunCommandArgs: args,
+	}
+	return hook.Main(r, hctxt, nil)
 }
 
 // Run implements hook.Runner.Run.

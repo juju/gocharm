@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"sort"
-	"testing"
 	"time"
 
 	"github.com/juju/juju/apiserver/params"
@@ -19,8 +18,6 @@ import (
 
 	"github.com/juju/gocharm/hook"
 )
-
-func TestPackage(t *testing.T) { TestingT(t) }
 
 func bufferString(w io.Writer) string {
 	return w.(*bytes.Buffer).String()

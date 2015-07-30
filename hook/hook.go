@@ -75,6 +75,9 @@ type Context struct {
 	// CharmDir holds the directory that the charm is running from.
 	CharmDir string
 
+	// HookStateDir holds the directory where hook state is stored.
+	HookStateDir string
+
 	// HookName holds the name of the currently running hook.
 	HookName string
 
@@ -150,16 +153,15 @@ func (ctxt *Context) withRegistryName(registryName string) *Context {
 	return &ctxt1
 }
 
-// hookStateDir is where hook local state will be stored.
-// TODO would /etc/init be a better place for this?
-var hookStateDir = "/var/lib/juju-localstate"
-
 // StateDir returns the path to the directory where local state for the
 // given context will be stored. The directory is relative to the
 // registry through which the context was created. It is not guaranteed
 // to exist.
 func (ctxt *Context) StateDir() string {
-	return filepath.Join(hookStateDir, ctxt.UUID+"-"+ctxt.UnitTag(), ctxt.registryName)
+	if ctxt.HookStateDir == "" {
+		panic("empty hook state directory")
+	}
+	return filepath.Join(ctxt.HookStateDir, ctxt.UUID+"-"+ctxt.UnitTag(), ctxt.registryName)
 }
 
 // CommandName returns a value that can be used to make runhook run the

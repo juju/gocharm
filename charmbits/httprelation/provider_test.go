@@ -124,6 +124,8 @@ func (ctxt *context) runHook(c *gc.C, hookName string, relId hook.RelationId, re
 				register(&p, r)
 			}
 		},
+		HookStateDir: "/dev/null",
+
 		Relations:   ctxt.relations,
 		RelationIds: ctxt.relationIds,
 		Config:      ctxt.config,
