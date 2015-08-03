@@ -16,7 +16,6 @@ type suite struct{}
 var _ = gc.Suite(&suite{})
 
 func (*suite) TestService(c *gc.C) {
-	var svc service.Service
 
 	startCount := 0
 	configChangedCount := 0
@@ -28,6 +27,7 @@ func (*suite) TestService(c *gc.C) {
 	r := &hooktest.Runner{
 		HookStateDir: c.MkDir(),
 		RegisterHooks: func(r *hook.Registry) {
+			var svc service.Service
 			svc.Register(r.Clone("svc"), "servicename", startService)
 			var ctxt *hook.Context
 			r.RegisterContext(func(hctxt *hook.Context) error {

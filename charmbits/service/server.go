@@ -23,7 +23,6 @@ type serviceParams struct {
 // runServer runs the server side of the service. It is invoked
 // (indirectly) by upstart.
 func runServer(start func(ctxt *Context, args []string) (hook.Command, error), args []string) (hook.Command, error) {
-	log.Printf("server started %q", args)
 	if len(args) != 1 {
 		return nil, errgo.Newf("expected exactly one argument, found %q", args)
 	}
@@ -66,9 +65,11 @@ func (c *rpcCommand) run(srv *rpc.Server) {
 			log.Printf("local socket accept failed: %v", err)
 			return
 		}
-		log.Printf("local RPC accepted dial request")
-		// TODO shut down existing RPC requests cleanly
-		go srv.ServeCodec(jsonrpc.NewServerCodec(conn))
+		c.tomb.Go(func() error {
+			srv.ServeCodec(jsonrpc.NewServerCodec(conn))
+			conn.Close()
+			return nil
+		})
 	}
 }
 
@@ -90,7 +91,6 @@ func (ctxt *Context) ServeLocalRPC(rcvr interface{}) (hook.Command, error) {
 	cmd := &rpcCommand{
 		listener: listener,
 	}
-	log.Printf("accepting local service on %s", ctxt.socketPath)
 	cmd.tomb.Go(func() error {
 		cmd.run(srv)
 		return nil

@@ -79,6 +79,7 @@ var (
 	verbose = flag.Bool("v", false, "print information about charms being built")
 	source  = flag.Bool("source", false, "include source code instead of binary executable")
 	godeps  = flag.Bool("godeps", false, "include godeps output in $CHARM_DIR/dependencies.tsv")
+	keep    = flag.Bool("keep", false, "do not delete temporary files")
 )
 
 // TODO select current OS version by default
@@ -147,7 +148,9 @@ func main1(pkgPath string) error {
 	if err != nil {
 		return errgo.Notef(err, "cannot make temporary directory")
 	}
-	defer os.RemoveAll(tempDir)
+	if !*keep {
+		defer os.RemoveAll(tempDir)
+	}
 
 	tempCharmDir := filepath.Join(tempDir, "charm")
 	if err := copyContents(pkg, tempCharmDir); err != nil {

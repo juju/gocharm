@@ -302,7 +302,7 @@ func (ctxt *Context) GetConfigString(key string) (string, error) {
 	return val, nil
 }
 
-// GetConfigString returns the charm configuration value for the given
+// GetConfigInt returns the charm configuration value for the given
 // key as an int. It returns zero if the value has not been
 // set.
 func (ctxt *Context) GetConfigInt(key string) (int, error) {
@@ -313,7 +313,7 @@ func (ctxt *Context) GetConfigInt(key string) (int, error) {
 	return val, nil
 }
 
-// GetConfigString returns the charm configuration value for the given
+// GetConfigFloat64 returns the charm configuration value for the given
 // key as a float64. It returns zero if the value has not been
 // set.
 func (ctxt *Context) GetConfigFloat64(key string) (float64, error) {
@@ -324,7 +324,7 @@ func (ctxt *Context) GetConfigFloat64(key string) (float64, error) {
 	return val, nil
 }
 
-// GetConfigString returns the charm configuration value for the given
+// GetConfigBool returns the charm configuration value for the given
 // key as a bool. It returns false if the value has not been
 // set.
 func (ctxt *Context) GetConfigBool(key string) (bool, error) {

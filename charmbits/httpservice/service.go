@@ -6,16 +6,14 @@
 package httpservice
 
 import (
-	"crypto/tls"
 	"encoding/json"
-	"net"
+	"io"
 	"net/http"
 	"reflect"
 	"strconv"
-	"time"
+	"sync"
 
 	"gopkg.in/errgo.v1"
-	"gopkg.in/tomb.v2"
 
 	"github.com/juju/gocharm/charmbits/httprelation"
 	"github.com/juju/gocharm/charmbits/service"
@@ -25,47 +23,178 @@ import (
 // Service represents an HTTP service. It provides an http
 // relation runs a Go HTTP handler as a service.
 type Service struct {
-	ctxt    *hook.Context
-	svc     service.Service
-	http    httprelation.Provider
-	state   localState
-	handler *handler
+	ctxt           *hook.Context
+	svc            service.Service
+	http           httprelation.Provider
+	state          localState
+	handlerInfo    *handlerInfo
+	relationValues map[string][]byte
 }
 
 type localState struct {
-	HTTPPort       int
-	HTTPSPort      int
-	TLSCert        string
-	Started        bool
-	ServiceStarted bool
-	StartArg       string
+	ArgData []byte
+	Started bool
+}
+
+var (
+	registeredRelations      = make(map[reflect.Type]*registeredRelation)
+	registeredRelationsMutex sync.Mutex
+)
+
+type registeredRelation struct {
+	// t holds the type of the field that the server will see when
+	// running. The first argument of setFieldValue is a pointer
+	// to this type.
+	t reflect.Type
+
+	// d holds the type of the relation data that's transferred across
+	// the RPC channel to the server. The second argument of setFieldValue
+	// has this type.
+	d reflect.Type
+
+	// registerField is documented in RegisterRelationType.
+	registerField func(r *hook.Registry, tag string) (getVal func() (interface{}, error))
+
+	// setFieldValue is a function value as documented in RegisterRelationType.
+	setFieldValue reflect.Value
+}
+
+var (
+	ErrRestartNeeded      = errgo.New("handler needs to be restarted")
+	ErrRelationIncomplete = errgo.New("relation data is incomplete")
+)
+
+// RegisterRelationType registers a relation type that can be passed to a
+// handler. It may be called by a relation package to register a type
+// that may be used in field of the R argument to handler function
+// registered with Register.
+//
+// This function is usually called implicitly as a result of importing
+// a relation package.
+//
+// The register function argument will be called when a charm registers
+// a handler function that has an second argument with a struct type
+// that has a field of type T. Its arguments are the current hook
+// registry, the httpservice tag associated with the field (if any).
+//
+// The registerField function should return a function that will be called
+// after any hook functions registered and which should return any data
+// associated with the relation in a JSON-marshalable value. This will
+// be unmarshaled and passed as the second setFieldValue argument
+// when the server is started.
+//
+// If the data associated with the relation is incomplete, registerField
+// may return an error with an ErrRelationIncomplete cause,
+// in which case the handler will be stopped until the relation is complete.
+// TODO provide a mechanism for making relations optional.
+//
+// The setFieldValue argument should be a function of the form
+//
+//	func(fv *T, val D) error
+//
+// where T is the struct-field type to be registered and D is the JSON-marshalable
+// type returned from getVal (the data that will be sent to the
+// server). The setFieldValue function will be called within the service whenever the
+// value returned by getVal changes. The value of fv will point to the
+// field to fill in from the relation data. Note that each time the
+// relation changes while the service is still running, the fv value
+// will be the same. If the change in the value requires the service to
+// be restarted, setFieldValue should return an error with an
+// ErrRestartNeeded cause. If any other error is returned, it will
+// be logged as a warning and made available in the charm status.
+// Even if setFieldValue returns an error, it should still set the value
+// appropriately (for example by zeroing out the field).
+func RegisterRelationType(
+	registerField func(r *hook.Registry, tag string) (getVal func() (interface{}, error)),
+	setFieldValue interface{},
+) {
+	registeredRelationsMutex.Lock()
+	defer registeredRelationsMutex.Unlock()
+	reg, err := newRegisteredRelation(registerField, reflect.ValueOf(setFieldValue))
+	if err != nil {
+		panic(errgo.Notef(err, "cannot register relation"))
+	}
+	if _, ok := registeredRelations[reg.t]; ok {
+		panic("type " + reg.t.String() + " registered twice")
+	}
+	registeredRelations[reg.t] = reg
+}
+
+func newRegisteredRelation(
+	registerField func(r *hook.Registry, tag string) (getVal func() (interface{}, error)),
+	setf reflect.Value,
+) (*registeredRelation, error) {
+	sett := setf.Type()
+	if sett.Kind() != reflect.Func {
+		return nil, errgo.Newf("setFieldValue function argument to RegisterRelationType is %v not func", sett)
+	}
+	if sett.NumOut() != 1 {
+		return nil, errgo.Newf("setFieldValue function argument to RegisterRelationType has wrong return count, got %d, want 1", sett.NumOut())
+	}
+	if sett.Out(0) != errorType {
+		return nil, errgo.Newf("setFieldValue function argument to RegisterRelationType has wrong return type, got %s, want error", sett.Out(0))
+	}
+	if sett.NumIn() != 2 {
+		return nil, errgo.Newf("setFieldValue function argument to RegisterRelationType has wrong argument count; got %d, want 2", sett.NumIn())
+	}
+	T := sett.In(0)
+	if T.Kind() != reflect.Ptr {
+		return nil, errgo.Newf("setFieldValue function argument to RegisterRelationType has wrong first argument type; got %s want pointer", T)
+	}
+	return &registeredRelation{
+		t:             T.Elem(),
+		d:             sett.In(1),
+		registerField: registerField,
+		setFieldValue: setf,
+	}, nil
+}
+
+// Handler represents a handler that can also be
+// closed to free any of its associated resources.
+type Handler interface {
+	http.Handler
+	io.Closer
 }
 
 // Register registers the service with the given registry.
 // If serviceName is non-empty, it specifies the name of the service,
 // otherwise the service will be named after the charm's unit.
-// The relationName parameter specifies the name of the
+// The httpRelationName parameter specifies the name of the
 // http relation.
 //
-// The handler value must be a function of the form:
+// The handler value must be a function in one of
+// the following forms:
 //
-//	func(T) (http.Handler, error)
+//	func(T) (Handler, error)
+//	func(T, *R) (Handler, error)
 //
-// for some type T that can be marshaled as JSON.
+// for some type T that can be marshaled as JSON
+// and some struct type R that contains exported fields
+// with types registered with RegisterRelationType.
+// Currently, anonymous fields are not supported.
+//
 // When the service is started, this function will be called
-// with the arguments provided to the Start method.
+// with the argument provided to the Start method,
+// and any R argument filled in with the values for any
+// current relations.
 //
 // Note that the handler function will not be called with
 // any hook context available, as it is run by the OS-provided
 // service runner (e.g. upstart).
-func (svc *Service) Register(r *hook.Registry, serviceName, relationName string, handler interface{}) {
-	h, err := newHandler(handler)
+//
+// When a new handler is required, the old one will be closed
+// before the new one is started, but outstanding
+// HTTP requests will not be waited for (this may change).
+func (svc *Service) Register(r *hook.Registry, serviceName, httpRelationName string, handler interface{}) {
+	h, err := svc.newHandlerInfo(handler, r)
 	if err != nil {
 		panic(errgo.Notef(err, "cannot register handler function"))
 	}
-	svc.handler = h
-	svc.svc.Register(r.Clone("service"), serviceName, svc.startServer)
-	svc.http.Register(r.Clone("http"), relationName, true)
+	svc.handlerInfo = h
+	svc.svc.Register(r.Clone("service"), serviceName, func(ctxt *service.Context, args []string) (hook.Command, error) {
+		return startServer(ctxt, args, svc.handlerInfo)
+	})
+	svc.http.Register(r.Clone("http"), httpRelationName, true)
 	r.RegisterContext(svc.setContext, &svc.state)
 	r.RegisterHook("*", svc.changed)
 }
@@ -87,41 +216,66 @@ func (svc *Service) HTTPSPort() int {
 	return svc.http.HTTPSPort()
 }
 
-func (svc *Service) changed() error {
-	httpPort := svc.http.HTTPPort()
-	httpsPort := svc.http.HTTPSPort()
-	if httpPort == svc.state.HTTPPort && httpsPort == svc.state.HTTPSPort {
-		return nil
-	}
-	if httpPort == 0 && httpsPort == 0 {
-		return svc.svc.Stop()
-	}
-	if err := svc.start(svc.state.StartArg); err != nil {
-		return errgo.Mask(err)
-	}
-	return nil
-}
-
-// Started reports whether the service has been started.
-func (svc *Service) ServiceStarted() bool {
-	return svc.state.ServiceStarted
-}
-
 // Start starts the service with the given argument.
 // The type of arg must be the same as the type T in
 // the handler function provided to Register.
 //
-// If the argument values change, the service will be
-// be restarted, otherwise the service will be left
-// unchanged if it is already started.
+// If the value changes, a new handler will be started
+// with the given argument value.
 func (svc *Service) Start(arg interface{}) error {
-	argStr, err := svc.handler.marshal(arg)
+	argData, err := svc.handlerInfo.marshal(arg)
 	if err != nil {
 		return errgo.Mask(err)
 	}
-	if err := svc.start(argStr); err != nil {
+	svc.state.ArgData = argData
+	svc.state.Started = true
+	return svc.changed()
+}
+
+// changed is called after any hook has been invoked.
+// It gets the current value of all settings and starts,
+// stops or notifies the server appropriately.
+func (svc *Service) changed() error {
+	svc.ctxt.Logf("httpservice: changed, hook %s", svc.ctxt.HookName)
+	httpPort := svc.http.HTTPPort()
+	httpsPort := svc.http.HTTPSPort()
+	cert, err := svc.http.TLSCertPEM()
+	if err != nil && errgo.Cause(err) != httprelation.ErrHTTPSNotConfigured {
+		svc.ctxt.Logf("bad TLS cert")
+		// TODO set charm status instead?
 		return errgo.Mask(err)
 	}
+	if !svc.state.Started || httpPort == 0 && (httpsPort == 0 || cert == "") {
+		svc.ctxt.Logf("httpservice: stopping service")
+		return svc.svc.Stop()
+	}
+	if !svc.svc.Started() {
+		svc.ctxt.Logf("httpservice: starting service")
+		if err := svc.svc.Start(svc.ctxt.StateDir()); err != nil {
+			return errgo.Notef(err, "cannot start service")
+		}
+	} else {
+		svc.ctxt.Logf("httpservice: no need to start service")
+	}
+	state := &ServerState{
+		HTTPPort:       httpPort,
+		HTTPSPort:      httpsPort,
+		CertPEM:        cert,
+		ArgData:        svc.state.ArgData,
+		RelationValues: svc.relationValues,
+	}
+	svc.ctxt.Logf("calling Srv.Set %#v", state)
+	var resp Feedback
+	if err := svc.svc.Call("Srv.Set", state, &resp); err != nil {
+		return errgo.Notef(err, "cannot set state in server")
+	}
+	if len(resp.Warnings) == 0 {
+		return nil
+	}
+	for _, w := range resp.Warnings {
+		svc.ctxt.Logf("warning: %s", w)
+	}
+	// TODO set status to reflect warnings?
 	return nil
 }
 
@@ -173,33 +327,10 @@ func (svc *Service) PublicHTTPSURL() (string, error) {
 	return url, nil
 }
 
-func (svc *Service) start(argStr string) error {
-	httpPort := svc.http.HTTPPort()
-	httpsPort := svc.http.HTTPSPort()
-	if httpPort == 0 && httpsPort == 0 {
-		svc.state.StartArg = argStr
-		svc.state.Started = true
-		return nil
-	}
-	cert, err := svc.http.TLSCertPEM()
-	if err != nil && errgo.Cause(err) != httprelation.ErrHTTPSNotConfigured {
-		return errgo.Mask(err)
-	}
-	if err := svc.svc.Start(strconv.Itoa(httpPort), strconv.Itoa(httpsPort), cert, argStr); err != nil {
-		return errgo.Mask(err)
-	}
-	svc.state.ServiceStarted = true
-	svc.state.StartArg = argStr
-	return nil
-}
-
 // Stop stops the service.
 func (svc *Service) Stop() error {
-	if err := svc.svc.Stop(); err != nil {
-		return errgo.Mask(err)
-	}
+	svc.state.ArgData = nil
 	svc.state.Started = false
-	svc.state.ServiceStarted = false
 	return nil
 }
 
@@ -208,191 +339,120 @@ func (svc *Service) Restart() error {
 	return svc.svc.Restart()
 }
 
-type server struct {
-	tomb    tomb.Tomb
-	handler *handler
-
-	httpListener  net.Listener
-	httpsListener net.Listener
-}
-
-func (svc *Service) startServer(ctxt *service.Context, args []string) (hook.Command, error) {
-	srv := server{
-		handler: svc.handler,
-	}
-	return srv.start(ctxt, args)
-}
-
-func (srv *server) start(ctxt *service.Context, args []string) (hook.Command, error) {
-	if len(args) != 4 {
-		return nil, errgo.Newf("got %d arguments, expected 4", len(args))
-	}
-	httpPort, err := strconv.Atoi(args[0])
-	if err != nil || httpPort < 0 {
-		return nil, errgo.Newf("invalid port %q", args[0])
-	}
-	httpsPort, err := strconv.Atoi(args[1])
-	if err != nil || httpsPort < 0 {
-		return nil, errgo.Newf("invalid port %q", args[1])
-	}
-	certPEM := args[2]
-	h, err := srv.handler.get(args[3])
-	if err != nil {
-		return nil, errgo.Newf("cannot get handler: %v", err)
-	}
-	httpListener, httpAddr, err := srv.listenHTTP(httpPort)
-	if err != nil {
-		return nil, errgo.Mask(err)
-	}
-	if httpsPort != 0 && certPEM != "" {
-		httpsListener, httpsAddr, err := srv.listenHTTPS(httpsPort, certPEM)
-		if err != nil {
-			httpListener.Close()
-			return nil, errgo.Mask(err)
-		}
-		srv.httpsListener = httpsListener
-		httpsServer := &http.Server{
-			Addr:    httpsAddr,
-			Handler: h,
-		}
-		srv.tomb.Go(func() error {
-			return httpsServer.Serve(httpsListener)
-		})
-	}
-
-	srv.httpListener = httpListener
-	httpServer := &http.Server{
-		Addr:    httpAddr,
-		Handler: h,
-	}
-	srv.tomb.Go(func() error {
-		return httpServer.Serve(httpListener)
-	})
-	srv.tomb.Go(func() error {
-		<-srv.tomb.Dying()
-		if srv.httpListener != nil {
-			srv.httpListener.Close()
-		}
-		if srv.httpsListener != nil {
-			srv.httpsListener.Close()
-		}
-		return nil
-	})
-	return srv, nil
-}
-
-// Kill implements hook.Command.Kill.
-func (srv *server) Kill() {
-	srv.tomb.Kill(nil)
-}
-
-// Wait implements hook.Command.Wait.
-func (srv *server) Wait() error {
-	return srv.tomb.Wait()
-}
-
-func (*server) listenHTTP(port int) (net.Listener, string, error) {
-	addr := ":" + strconv.Itoa(port)
-	listener, err := net.Listen("tcp", addr)
-	if err != nil {
-		return nil, "", errgo.Newf("cannot listen on %s: %v", addr, err)
-	}
-	return listener, addr, nil
-}
-
-func (*server) listenHTTPS(port int, certPEM string) (net.Listener, string, error) {
-	certPEMBytes := []byte(certPEM)
-	cert, err := tls.X509KeyPair(certPEMBytes, certPEMBytes)
-	if err != nil {
-		return nil, "", errgo.Newf("cannot parse certificate: %v", err)
-	}
-	config := &tls.Config{
-		NextProtos:   []string{"http/1.1"},
-		Certificates: []tls.Certificate{cert},
-	}
-	addr := ":" + strconv.Itoa(port)
-	listener, err := net.Listen("tcp", addr)
-	if err != nil {
-		return nil, "", errgo.Newf("cannot listen on %s: %v", addr, err)
-	}
-	return tls.NewListener(
-		tcpKeepAliveListener{listener.(*net.TCPListener)},
-		config,
-	), addr, nil
-}
-
-type handler struct {
-	argType reflect.Type
-	fv      reflect.Value
+type handlerInfo struct {
+	argType      reflect.Type
+	relationType reflect.Type
+	fv           reflect.Value
 }
 
 var (
-	httpHandlerType = reflect.TypeOf((*http.Handler)(nil)).Elem()
-	errorType       = reflect.TypeOf((*error)(nil)).Elem()
+	handlerType = reflect.TypeOf((*Handler)(nil)).Elem()
+	errorType   = reflect.TypeOf((*error)(nil)).Elem()
 )
 
-func newHandler(f interface{}) (*handler, error) {
+// newHandler makes a new handler value from the given function,
+// which should be in one of the forms expected by Service.Register.
+// It also registers any relations required by the handler.
+func (svc *Service) newHandlerInfo(f interface{}, registry *hook.Registry) (*handlerInfo, error) {
 	fv := reflect.ValueOf(f)
 	ft := fv.Type()
 	if ft.Kind() != reflect.Func {
-		return nil, errgo.Newf("bad handler; got %T, expected function", f)
+		return nil, errgo.Newf("bad handler: got %T, expected function", f)
 	}
-	if n := ft.NumIn(); n != 1 {
-		return nil, errgo.Newf("bad handler; got %d arguments, expected 1", n)
+	if n := ft.NumIn(); n != 1 && n != 2 {
+		return nil, errgo.Newf("bad handler:ag got %d arguments, expected 1 or 2", n)
 	}
 	if n := ft.NumOut(); n != 2 {
-		return nil, errgo.Newf("bad handler; got %d return values, expected 2", n)
+		return nil, errgo.Newf("bad handler: got %d return values, expected 2", n)
 	}
-	if ft.Out(0) != httpHandlerType || ft.Out(1) != errorType {
-		return nil, errgo.Newf("bad handler; got return values (%s, %s), expected (http.Handler, error)", ft.Out(0), ft.Out(1))
+	if ft.Out(0) != handlerType || ft.Out(1) != errorType {
+		return nil, errgo.Newf("bad handler: got return values (%s, %s), expected (httpservice.Handler, error)", ft.Out(0), ft.Out(1))
 	}
-	return &handler{
+	h := &handlerInfo{
 		argType: ft.In(0),
 		fv:      fv,
-	}, nil
+	}
+	if ft.NumIn() == 1 {
+		// No relations, nothing more to do.
+		return h, nil
+	}
+	svc.relationValues = make(map[string][]byte)
+	rt := ft.In(1)
+	if rt.Kind() != reflect.Ptr || rt.Elem().Kind() != reflect.Struct {
+		return nil, errgo.Newf("bad handler: second argument is %v not a pointer to struct", h.relationType)
+	}
+	h.relationType = rt.Elem()
+	getters := make(map[string]func() (interface{}, error))
+	for i := 0; i < h.relationType.NumField(); i++ {
+		// TODO anonymous fields?
+		f := h.relationType.Field(i)
+		if f.PkgPath != "" {
+			continue
+		}
+		reg := registeredRelations[f.Type]
+		if reg == nil {
+			return nil, errgo.Newf("bad handler: field %s of type %s is not a registered relation type: missing import?", f.Name, f.Type)
+		}
+		getters[f.Name] = reg.registerField(registry.Clone("rel-"+f.Name), f.Tag.Get("httpservice"))
+	}
+	registry.RegisterHook("*", func() error {
+		for name, getter := range getters {
+			val, err := getter()
+			if err != nil {
+				if errgo.Cause(err) == ErrRelationIncomplete {
+					delete(svc.relationValues, name)
+					continue
+				}
+				return errgo.Notef(err, "cannot get value for field %s", name)
+			}
+			data, err := json.Marshal(val)
+			if err != nil {
+				return errgo.Notef(err, "cannot marshal value for field %s", name)
+			}
+			if len(data) == 0 {
+				return errgo.Notef(err, "field %s marshaled to no data", name)
+			}
+			svc.relationValues[name] = data
+		}
+		svc.ctxt.Logf("after running getters, data: %#v", svc.relationValues)
+		return nil
+	})
+	return h, nil
 }
 
-func (h *handler) get(arg string) (http.Handler, error) {
+// handler returns the actual HTTP handler to serve by
+// calling the registered handler function.
+// The given argument holds JSON-marshaled data
+// that will be unmarshaled into the first argument
+// of the getter function. The other must be addressable
+// and have the same type as h.relationType.
+//
+// This function, unlike the other methods on handlerInfo
+// called in server context, not hook context.
+func (h *handlerInfo) handler(arg []byte, val reflect.Value) (Handler, error) {
 	argv := reflect.New(h.argType)
-	err := json.Unmarshal([]byte(arg), argv.Interface())
+	err := json.Unmarshal(arg, argv.Interface())
 	if err != nil {
-		return nil, errgo.Notef(err, "cannot unmarshal %s into %s", arg, argv.Type())
+		return nil, errgo.Notef(err, "cannot unmarshal into %s", argv.Type())
 	}
-	r := h.fv.Call([]reflect.Value{argv.Elem()})
+	r := h.fv.Call([]reflect.Value{argv.Elem(), val.Addr()})
 	if err := r[1].Interface(); err != nil {
 		return nil, err.(error)
 	}
-	return r[0].Interface().(http.Handler), nil
+	return r[0].Interface().(Handler), nil
 }
 
-func (h *handler) marshal(arg interface{}) (string, error) {
+// marshal marshals the client-specific data in arg.
+// It fails if the data is not the same type expected
+// by the registered handler function.
+func (h *handlerInfo) marshal(arg interface{}) ([]byte, error) {
 	argv := reflect.ValueOf(arg)
 	if argv.Type() != h.argType {
-		return "", errgo.Newf("unexpected argument type; got %s, expected %s", argv.Type(), h.argType)
+		return nil, errgo.Newf("unexpected argument type; got %s, expected %s", argv.Type(), h.argType)
 	}
 	data, err := json.Marshal(argv.Interface())
 	if err != nil {
-		return "", errgo.Notef(err, "cannot marshal %#v", arg)
+		return nil, errgo.Notef(err, "cannot marshal %#v", arg)
 	}
-	return string(data), nil
-}
-
-// tcpKeepAliveListener is stolen from net/http
-
-// tcpKeepAliveListener sets TCP keep-alive timeouts on accepted
-// connections. It's used by ListenAndServe and ListenAndServeTLS so
-// dead TCP connections (e.g. closing laptop mid-download) eventually
-// go away.
-type tcpKeepAliveListener struct {
-	*net.TCPListener
-}
-
-func (ln tcpKeepAliveListener) Accept() (c net.Conn, err error) {
-	tc, err := ln.AcceptTCP()
-	if err != nil {
-		return
-	}
-	tc.SetKeepAlive(true)
-	tc.SetKeepAlivePeriod(3 * time.Minute)
-	return tc, nil
+	return data, nil
 }
