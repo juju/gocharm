@@ -34,7 +34,7 @@ func (*suite) TestHTTPService(c *gc.C) {
 			svc.Register(r.Clone("svc"), "httpservicename", "http", func(_ struct{}, rel *relations) (httpservice.Handler, error) {
 				c.Logf("starting test handler")
 				return &testHandler{
-					session: rel.Session,
+					session: rel.Session.Copy(),
 				}, nil
 			})
 			r.RegisterHook("start", func() error {

@@ -99,11 +99,14 @@ var (
 // field to fill in from the relation data. Note that each time the
 // relation changes while the service is still running, the fv value
 // will be the same. If the change in the value requires the service to
-// be restarted, setFieldValue should return an error with an
+// be restarted, setFieldValue should not set anything and
+// should return an error with an
 // ErrRestartNeeded cause. If any other error is returned, it will
 // be logged as a warning and made available in the charm status.
-// Even if setFieldValue returns an error, it should still set the value
-// appropriately (for example by zeroing out the field).
+//
+// When the server is finally stopped, setFieldValue will be called with a
+// zero D value, signifying that the value should be finalized (for example
+// by closing it if it is a network connection).
 func RegisterRelationType(
 	registerField func(r *hook.Registry, tag string) (getVal func() (interface{}, error)),
 	setFieldValue interface{},
@@ -176,7 +179,8 @@ type Handler interface {
 // When the service is started, this function will be called
 // with the argument provided to the Start method,
 // and any R argument filled in with the values for any
-// current relations.
+// current relations. Note that it is not the responsibility
+// of the handler to finalize any relation values.
 //
 // Note that the handler function will not be called with
 // any hook context available, as it is run by the OS-provided
@@ -232,11 +236,25 @@ func (svc *Service) Start(arg interface{}) error {
 	return svc.changed()
 }
 
+// Stop stops the service.
+func (svc *Service) Stop() error {
+	svc.state.ArgData = nil
+	svc.state.Started = false
+	// Note that we need to call changed here because
+	// the Stop method might be called in a "*" hook
+	// which runs after our own changed method.
+	return svc.changed()
+}
+
+// Restart restarts the service.
+func (svc *Service) Restart() error {
+	return svc.svc.Restart()
+}
+
 // changed is called after any hook has been invoked.
 // It gets the current value of all settings and starts,
 // stops or notifies the server appropriately.
 func (svc *Service) changed() error {
-	svc.ctxt.Logf("httpservice: changed, hook %s", svc.ctxt.HookName)
 	httpPort := svc.http.HTTPPort()
 	httpsPort := svc.http.HTTPSPort()
 	cert, err := svc.http.TLSCertPEM()
@@ -264,7 +282,6 @@ func (svc *Service) changed() error {
 		ArgData:        svc.state.ArgData,
 		RelationValues: svc.relationValues,
 	}
-	svc.ctxt.Logf("calling Srv.Set %#v", state)
 	var resp Feedback
 	if err := svc.svc.Call("Srv.Set", state, &resp); err != nil {
 		return errgo.Notef(err, "cannot set state in server")
@@ -325,18 +342,6 @@ func (svc *Service) PublicHTTPSURL() (string, error) {
 		url += ":" + strconv.Itoa(port)
 	}
 	return url, nil
-}
-
-// Stop stops the service.
-func (svc *Service) Stop() error {
-	svc.state.ArgData = nil
-	svc.state.Started = false
-	return nil
-}
-
-// Restart restarts the service.
-func (svc *Service) Restart() error {
-	return svc.svc.Restart()
 }
 
 type handlerInfo struct {
@@ -414,7 +419,6 @@ func (svc *Service) newHandlerInfo(f interface{}, registry *hook.Registry) (*han
 			}
 			svc.relationValues[name] = data
 		}
-		svc.ctxt.Logf("after running getters, data: %#v", svc.relationValues)
 		return nil
 	})
 	return h, nil
@@ -424,18 +428,23 @@ func (svc *Service) newHandlerInfo(f interface{}, registry *hook.Registry) (*han
 // calling the registered handler function.
 // The given argument holds JSON-marshaled data
 // that will be unmarshaled into the first argument
-// of the getter function. The other must be addressable
-// and have the same type as h.relationType.
+// of the getter function. If h.relationType is non-nil,
+// the other must be addressable and have the same type as h.relationType.
 //
-// This function, unlike the other methods on handlerInfo
-// called in server context, not hook context.
+// This function, unlike the other methods on handlerInfo,
+// is called in server context, not hook context.
 func (h *handlerInfo) handler(arg []byte, val reflect.Value) (Handler, error) {
 	argv := reflect.New(h.argType)
 	err := json.Unmarshal(arg, argv.Interface())
 	if err != nil {
 		return nil, errgo.Notef(err, "cannot unmarshal into %s", argv.Type())
 	}
-	r := h.fv.Call([]reflect.Value{argv.Elem(), val.Addr()})
+	var r []reflect.Value
+	if h.relationType != nil {
+		r = h.fv.Call([]reflect.Value{argv.Elem(), val.Addr()})
+	} else {
+		r = h.fv.Call([]reflect.Value{argv.Elem()})
+	}
 	if err := r[1].Interface(); err != nil {
 		return nil, err.(error)
 	}
