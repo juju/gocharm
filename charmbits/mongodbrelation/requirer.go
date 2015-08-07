@@ -100,7 +100,7 @@ func registerField(r *hook.Registry, tag string) func() (interface{}, error) {
 	req.Register(r, relationName)
 	return func() (interface{}, error) {
 		if url := req.URL(); url != "" {
-			return relationInfo{
+			return &relationInfo{
 				URL: req.URL(),
 			}, nil
 		}
@@ -108,9 +108,14 @@ func registerField(r *hook.Registry, tag string) func() (interface{}, error) {
 	}
 }
 
-func setFieldValue(f **mgo.Session, info relationInfo) error {
+func setFieldValue(f **mgo.Session, info *relationInfo) error {
 	if *f != nil {
+		(*f).Close()
+		*f = nil
 		return httpservice.ErrRestartNeeded
+	}
+	if info == nil {
+		return nil
 	}
 	session, err := mgo.Dial(info.URL)
 	if err != nil {

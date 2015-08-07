@@ -197,31 +197,58 @@ func (srv *server) serveHTTPS(port int, certPEM string, h http.Handler) (*handle
 // set sets the current state of the server, and starts
 // or restarts the HTTP listener when appropriate.
 func (srv *server) set(state ServerState, fb *Feedback) {
-	restartNeeded := false
-	noStart := false
+	httpOK := state.HTTPPort != 0
+	httpsOK := state.HTTPSPort != 0 && state.CertPEM != ""
+	if !httpOK && !httpsOK {
+		srv.closeResources()
+		return
+	}
+	restart := false
 	if err := srv.setRelations(state); err != nil {
 		switch cause := errgo.Cause(err); cause {
 		case ErrRestartNeeded:
-			restartNeeded = true
-		case ErrRelationIncomplete:
-			restartNeeded = true
-			fb.addError(err)
-			noStart = true
+			restart = true
 		default:
+			srv.closeResources()
 			fb.addError(err)
-			noStart = true
+			return
 		}
 	}
-	restartNeeded = restartNeeded || srv.needsRestart(state)
-	log.Printf("srv set state %#v; current state %#v", state, srv.state)
-	if restartNeeded {
-		srv.closeResources()
-	}
-	if noStart {
+	if !restart && !srv.needsRestart(state) && srv.handler != nil {
+		// No restart required and the handler's already running,
+		// so nothing to do.
 		return
 	}
-	httpOK := state.HTTPPort != 0
-	httpsOK := state.HTTPSPort != 0 && state.CertPEM != ""
+	if srv.handler != nil {
+		// We've got a running handler using the current relations value,
+		// so we need to close everything down before calling
+		// setRelations again.
+		srv.closeResources()
+	}
+	if !srv.relationState.IsValid() {
+		// We've just destroyed our existing relations value, so
+		// make a new one.
+		// TODO avoid finalizing the current value each time a relation
+		// is joined, only to re-make it again when another
+		// relation is joined. It's a difficult area though - we'd need
+		// make sure that we don't racily set fields when the handler
+		// is currently using them (unless the setFieldValue function
+		// is OK with that - for example it might want to send the
+		// new value down a channel).
+		if err := srv.setRelations(state); err != nil {
+			switch cause := errgo.Cause(err); cause {
+			case ErrRestartNeeded:
+				fb.addError(errgo.Newf("restart unexpectedly needed on empty relation value!"))
+				return
+			case ErrRelationIncomplete:
+				fb.addError(errgo.Newf("relation unexpectedly incomplete"))
+				return
+			default:
+				fb.addError(err)
+				return
+			}
+		}
+	}
 	h, err := srv.handlerInfo.handler(state.ArgData, srv.relationState)
 	if err != nil {
 		fb.addError(errgo.Notef(err, "cannot get handler"))
@@ -282,8 +309,7 @@ func (srv *server) needsRestart(state ServerState) bool {
 	// as mongodb informs all clients of the new addresses
 	// as a matter of course. We'll store the addresses however,
 	// and they'll be used when reconnecting.
-	return state.HTTPPort == 0 ||
-		state.HTTPPort != srv.state.HTTPPort ||
+	return state.HTTPPort != srv.state.HTTPPort ||
 		state.HTTPSPort != srv.state.HTTPSPort ||
 		state.CertPEM != srv.state.CertPEM ||
 		!bytes.Equal(state.ArgData, srv.state.ArgData)
@@ -323,7 +349,7 @@ func (srv *server) setRelations(state ServerState) error {
 		// TODO we could potentially do all these in parallel
 		// so that any network connections they might be
 		// making would be concurrent.
-		if err := srv.setFieldValue(f, state); err != nil {
+		if err := srv.setFieldValue(f, state.RelationValues[f.Name]); err != nil {
 			if errgo.Cause(err) == ErrRestartNeeded {
 				restartNeeded = true
 			} else {
@@ -337,9 +363,25 @@ func (srv *server) setRelations(state ServerState) error {
 	return nil
 }
 
+func (srv *server) finalizeFields() {
+	h := srv.handlerInfo
+	if h.relationType == nil || !srv.relationState.IsValid() {
+		return
+	}
+	for i := 0; i < h.relationType.NumField(); i++ {
+		f := h.relationType.Field(i)
+		if err := srv.setFieldValue(f, nil); err != nil && errgo.Cause(err) != ErrRestartNeeded {
+			log.Printf("cannot finalize field %s: %v", f.Name, err)
+		}
+	}
+	srv.relationState = reflect.Value{}
+}
+
 // setFieldValue sets the value of the given struct field from the
 // relation data for that field held in state.RelationValues.
-func (srv *server) setFieldValue(f reflect.StructField, state ServerState) error {
+// If data is empty, it passes the zero value to the field setter,
+// indicating that the value should be finalized.
+func (srv *server) setFieldValue(f reflect.StructField, data []byte) error {
 	registeredRelationsMutex.Lock()
 	reg := registeredRelations[f.Type]
 	registeredRelationsMutex.Unlock()
@@ -353,10 +395,11 @@ func (srv *server) setFieldValue(f reflect.StructField, state ServerState) error
 		reflect.New(reg.d),
 	}
 
-	// Unmarshal the data into the newly created  instance of type D.
-	data := state.RelationValues[f.Name]
-	if err := json.Unmarshal(data, args[1].Interface()); err != nil {
-		return errgo.Notef(err, "cannot unmarshal relation data (type %v, data %q)", args[1].Type(), data)
+	if len(data) > 0 {
+		// Unmarshal the data into the newly created  instance of type D.
+		if err := json.Unmarshal(data, args[1].Interface()); err != nil {
+			return errgo.Notef(err, "cannot unmarshal relation data (type %v, data %q)", args[1].Type(), data)
+		}
 	}
 	args[1] = args[1].Elem()
 	err, _ := reg.setFieldValue.Call(args)[0].Interface().(error)
@@ -369,10 +412,6 @@ func (srv *server) setFieldValue(f reflect.StructField, state ServerState) error
 // closeResources closes any current listeners. Called
 // with srv.mu held.
 func (srv *server) closeResources() {
-	if srv.handler != nil {
-		srv.handler.Close()
-		srv.handler = nil
-	}
 	if srv.httpListener != nil {
 		srv.httpListener.Kill()
 		srv.httpListener.Wait()
@@ -383,6 +422,11 @@ func (srv *server) closeResources() {
 		srv.httpsListener.Wait()
 		srv.httpsListener = nil
 	}
+	if srv.handler != nil {
+		srv.handler.Close()
+		srv.handler = nil
+	}
+	srv.finalizeFields()
 }
 
 func (srv *server) saveState(state ServerState) error {

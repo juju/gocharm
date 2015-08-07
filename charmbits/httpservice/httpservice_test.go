@@ -6,11 +6,13 @@ import (
 	"io/ioutil"
 	"net/http"
 	"reflect"
+	"sync/atomic"
 	"time"
 
 	jujutesting "github.com/juju/testing"
 	jc "github.com/juju/testing/checkers"
 	gc "gopkg.in/check.v1"
+	"gopkg.in/errgo.v1"
 	"gopkg.in/juju/charm.v5"
 
 	"github.com/juju/gocharm/charmbits/httpservice"
@@ -159,7 +161,18 @@ func (s *suite) TestRegister(c *gc.C) {
 }
 
 type testType struct {
+	// relValues holds the currently set value of the field.
 	relValues map[hook.UnitId]map[string]string
+
+	// isSet holds whether the field has been set.
+	isSet bool
+
+	// restarted holds whether setFieldValue has returned ErrRestartNeeded.
+	restarted bool
+
+	// finalized holds whether the value has been finalized by passing
+	// a zero second argument to setFieldValue.
+	finalized bool
 }
 
 type testArg struct {
@@ -184,17 +197,47 @@ func (s *suite) TestServer(c *gc.C) {
 			return nil, httpservice.ErrRelationIncomplete
 		}
 	}
-	setFieldValue := func(fieldVal *testType, vals map[hook.UnitId]map[string]string) error {
-		c.Logf("setFieldVal %v", vals)
-		if fieldVal.relValues != nil {
-			return httpservice.ErrRestartNeeded
+	// fieldValEvents records the events that have taken place on
+	// the field value.
+	var fieldValEvents []string
+	addFieldValEvent := func(e string) {
+		c.Logf("fieldValEvent %s", e)
+		fieldValEvents = append(fieldValEvents, e)
+	}
+	var prevFieldVal *testType
+	setFieldValue := func(fieldVal *testType, vals *map[hook.UnitId]map[string]string) error {
+		if fieldVal != prevFieldVal {
+			// We're using a new field value.
+			prevFieldVal = fieldVal
+			addFieldValEvent("new")
 		}
-		fieldVal.relValues = vals
-		return nil
+		switch {
+		case vals == nil:
+			if fieldVal.finalized {
+				return errgo.New("field finalized twice")
+			}
+			fieldVal.finalized = true
+			fieldVal.relValues = nil
+			addFieldValEvent("finalize")
+			return nil
+		case fieldVal.restarted:
+			addFieldValEvent("error")
+			return errgo.New("setFieldValue returned ErrRestartNeeded but saw a non-zero value")
+		case fieldVal.isSet:
+			fieldVal.restarted = true
+			fieldVal.relValues = nil
+			addFieldValEvent("restart")
+			return httpservice.ErrRestartNeeded
+		default:
+			fieldVal.relValues = *vals
+			fieldVal.isSet = true
+			addFieldValEvent(fmt.Sprintf("set %v", *vals))
+			return nil
+		}
 	}
 	httpservice.RegisterRelationType(registerField, setFieldValue)
 
-	closeNotify := make(chan struct{}, 1)
+	var startCount, closeCount int64
 	// Now create a test runner to actually test the logic.
 	runner := &hooktest.Runner{
 		HookStateDir: c.MkDir(),
@@ -204,11 +247,15 @@ func (s *suite) TestServer(c *gc.C) {
 				Test testType
 			}
 			svc.Register(r.Clone("svc"), "httpservicename", "http", func(arg testArg, rel *relations) (httpservice.Handler, error) {
+				if !rel.Test.isSet {
+					c.Errorf("relation not set when server started")
+				}
 				c.Logf("starting test handler")
+				atomic.AddInt64(&startCount, 1)
 				return &testHandler{
-					closeNotify: closeNotify,
-					arg:         arg.Arg,
-					relValues:   rel.Test.relValues,
+					closeCount: &closeCount,
+					arg:        arg.Arg,
+					relValues:  rel.Test.relValues,
 				}, nil
 			})
 			r.RegisterHook("start", func() error {
@@ -226,6 +273,9 @@ func (s *suite) TestServer(c *gc.C) {
 	notify := make(chan hooktest.ServiceEvent, 10)
 	service.NewService = hooktest.NewServiceFunc(runner, notify)
 
+	// Now go through the usual hook sequence to check
+	// that it actually responds correctly.
+
 	err := runner.RunHook("install", "", "")
 	c.Assert(err, gc.IsNil)
 	c.Assert(runner.Record, gc.HasLen, 0)
@@ -234,6 +284,10 @@ func (s *suite) TestServer(c *gc.C) {
 	c.Assert(err, gc.IsNil)
 	c.Assert(runner.Record, gc.HasLen, 0)
 
+	// Configure the HTTP port, which will allow the
+	// OS service to be started but the relation will not
+	// be ready yet, so the actual handler will not be
+	// created.
 	httpPort := jujutesting.FindTCPPort()
 	runner.Config = map[string]interface{}{
 		"http-port": httpPort,
@@ -250,6 +304,7 @@ func (s *suite) TestServer(c *gc.C) {
 	e = expectEvent(c, notify, hooktest.ServiceEventStart)
 	c.Assert(e.Params.Name, gc.Equals, "httpservicename")
 
+	// Provide relation values, allowing the relation data to be successfully created.
 	runner.Relations = map[hook.RelationId]map[hook.UnitId]map[string]string{
 		"rel0": {
 			"fooservice/0": {
@@ -263,36 +318,151 @@ func (s *suite) TestServer(c *gc.C) {
 	err = runner.RunHook("foorelation-relation-joined", "rel0", "fooservice/0")
 	c.Assert(err, gc.IsNil)
 	c.Assert(runner.Record, gc.HasLen, 0)
+	assertCount(c, &startCount, 1)
+	assertCount(c, &closeCount, 0)
 
-	resp, err := http.Get(fmt.Sprintf("http://localhost:%d/", httpPort))
-	c.Assert(err, gc.IsNil)
-	defer resp.Body.Close()
-	data, err := ioutil.ReadAll(resp.Body)
-	c.Assert(err, gc.IsNil)
-	var tresp testResponse
-	err = json.Unmarshal(data, &tresp)
-	c.Assert(err, gc.IsNil, gc.Commentf("data: %q", data))
-	c.Assert(tresp, jc.DeepEquals, testResponse{
-		Arg: "start arg",
-		RelValues: map[hook.UnitId]map[string]string{
-			"fooservice/0": {
-				"foo": "bar",
-			},
+	// assertServerValue checks that the server really is started by getting a value
+	// from it and checking that it looks correct.
+	assertServerValue := func(val map[hook.UnitId]map[string]string) {
+		resp, err := http.Get(fmt.Sprintf("http://localhost:%d/", httpPort))
+		c.Assert(err, gc.IsNil)
+		defer resp.Body.Close()
+		data, err := ioutil.ReadAll(resp.Body)
+		c.Assert(err, gc.IsNil)
+		var tresp testResponse
+		err = json.Unmarshal(data, &tresp)
+		c.Assert(err, gc.IsNil, gc.Commentf("data: %q", data))
+		c.Assert(tresp, jc.DeepEquals, testResponse{
+			Arg:       "start arg",
+			RelValues: val,
+		})
+	}
+	assertServerValue(map[hook.UnitId]map[string]string{
+		"fooservice/0": {
+			"foo": "bar",
 		},
 	})
 
+	// Change the relation data, which should cause the server
+	// to be restarted with the new relation data.
+	runner.Relations = map[hook.RelationId]map[hook.UnitId]map[string]string{
+		"rel0": {
+			"fooservice/0": {
+				"foo": "arble",
+			},
+		},
+	}
+	err = runner.RunHook("foorelation-relation-changed", "rel0", "fooservice/0")
+	c.Assert(err, gc.IsNil)
+	c.Assert(runner.Record, gc.HasLen, 0)
+	assertCount(c, &startCount, 2)
+	assertCount(c, &closeCount, 1)
+	assertServerValue(map[hook.UnitId]map[string]string{
+		"fooservice/0": {
+			"foo": "arble",
+		},
+	})
+
+	// Stop the service, which should close the handler and the field value.
 	err = runner.RunHook("stop", "", "")
 	c.Assert(err, gc.IsNil)
 	c.Assert(runner.Record, gc.HasLen, 0)
 
-	select {
-	case <-closeNotify:
-	case <-time.After(time.Second):
-		c.Fatalf("timed out waiting for close notification")
+	assertCount(c, &startCount, 2)
+	assertCount(c, &closeCount, 2)
+
+	c.Assert(fieldValEvents, jc.DeepEquals, []string{
+		// config-changed (relation-incomplete)
+		"new",
+		"finalize",
+		// foorelation-relation-joined
+		"new",
+		"set map[fooservice/0:map[foo:bar]]",
+		// foorelation-relation-changed
+		"restart",
+		"finalize",
+		"new",
+		"set map[fooservice/0:map[foo:arble]]",
+		"finalize",
+	})
+}
+
+func (s *suite) TestServerStopInStarHook(c *gc.C) {
+	var startCount, closeCount int64
+	// Now create a test runner to actually test the logic.
+	runner := &hooktest.Runner{
+		HookStateDir: c.MkDir(),
+		RegisterHooks: func(r *hook.Registry) {
+			var svc httpservice.Service
+			svc.Register(r.Clone("svc"), "httpservicename", "http", func(arg testArg) (httpservice.Handler, error) {
+				atomic.AddInt64(&startCount, 1)
+				return &testHandler{
+					closeCount: &closeCount,
+					arg:        arg.Arg,
+				}, nil
+			})
+			r.RegisterHook("start", func() error {
+				return svc.Start(testArg{
+					Arg: "start arg",
+				})
+			})
+			stopped := false
+			r.RegisterHook("stop", func() error {
+				// Don't actually stop it here but get the "*" hook to
+				// stop it later in this hook execution. This
+				// mirrors a bug found in actual code.
+				stopped = true
+				return nil
+			})
+			r.RegisterHook("*", func() error {
+				if stopped {
+					return svc.Stop()
+				}
+				return nil
+			})
+		},
+		Logger: c,
 	}
+
+	service.NewService = hooktest.NewServiceFunc(runner, nil)
+
+	// Now go through the usual hook sequence to check
+	// that it actually responds correctly.
+
+	err := runner.RunHook("install", "", "")
+	c.Assert(err, gc.IsNil)
+
+	err = runner.RunHook("start", "", "")
+	c.Assert(err, gc.IsNil)
+
+	// Configure the HTTP port, which will allow the
+	// OS service to be started but the relation will not
+	// be ready yet, so the actual handler will not be
+	// created.
+	httpPort := jujutesting.FindTCPPort()
+	runner.Config = map[string]interface{}{
+		"http-port": httpPort,
+	}
+	err = runner.RunHook("config-changed", "", "")
+	c.Assert(err, gc.IsNil)
+
+	assertCount(c, &startCount, 1)
+	assertCount(c, &closeCount, 0)
+
+	// Stop the service, which should close the handler and the field value.
+	err = runner.RunHook("stop", "", "")
+	c.Assert(err, gc.IsNil)
+
+	assertCount(c, &startCount, 1)
+	assertCount(c, &closeCount, 1)
+}
+
+func assertCount(c *gc.C, count *int64, expect int64) {
+	c.Assert(atomic.LoadInt64(count), gc.Equals, expect)
 }
 
 type testHandler struct {
+	closeCount  *int64
 	closeNotify chan struct{}
 	arg         string
 	relValues   map[hook.UnitId]map[string]string
@@ -313,7 +483,7 @@ func (h *testHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 }
 
 func (h *testHandler) Close() error {
-	h.closeNotify <- struct{}{}
+	atomic.AddInt64(h.closeCount, 1)
 	return nil
 }
 
