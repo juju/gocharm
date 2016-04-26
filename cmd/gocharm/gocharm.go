@@ -12,7 +12,7 @@ import (
 	"text/template"
 
 	"gopkg.in/errgo.v1"
-	"gopkg.in/juju/charm.v5"
+	"gopkg.in/juju/charm.v6-unstable"
 	"gopkg.in/yaml.v1"
 )
 

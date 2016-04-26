@@ -8,7 +8,7 @@ package simplerelation
 import (
 	"sort"
 
-	"gopkg.in/juju/charm.v5"
+	"gopkg.in/juju/charm.v6-unstable"
 
 	"github.com/juju/gocharm/hook"
 )

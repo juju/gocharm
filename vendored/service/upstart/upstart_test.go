@@ -32,6 +32,7 @@ type UpstartSuite struct {
 var _ = gc.Suite(&UpstartSuite{})
 
 func (s *UpstartSuite) SetUpTest(c *gc.C) {
+	s.BaseSuite.SetUpTest(c)
 	s.testPath = c.MkDir()
 	s.initDir = c.MkDir()
 	s.PatchEnvPathPrepend(s.testPath)

@@ -10,11 +10,12 @@ import (
 	"sort"
 	"time"
 
+	"github.com/juju/errgo"
 	"github.com/juju/juju/apiserver/params"
 	"github.com/juju/juju/worker/uniter/runner/jujuc"
 	"github.com/juju/utils/set"
 	. "gopkg.in/check.v1"
-	"gopkg.in/juju/charm.v5"
+	"gopkg.in/juju/charm.v6-unstable"
 
 	"github.com/juju/gocharm/hook"
 )
@@ -117,12 +118,12 @@ func (c *ServerContext) SetUnitStatus(status jujuc.StatusInfo) error {
 	return nil
 }
 
-func (c *ServerContext) PublicAddress() (string, bool) {
-	return "gimli.minecraft.example.com", true
+func (c *ServerContext) PublicAddress() (string, error) {
+	return "gimli.minecraft.example.com", nil
 }
 
-func (c *ServerContext) PrivateAddress() (string, bool) {
-	return "192.168.0.99", true
+func (c *ServerContext) PrivateAddress() (string, error) {
+	return "192.168.0.99", nil
 }
 
 func (c *ServerContext) OpenPort(protocol string, port int) error {
@@ -153,25 +154,31 @@ func (c *ServerContext) ConfigSettings() (charm.Settings, error) {
 	}, nil
 }
 
-func (c *ServerContext) HookRelation() (jujuc.ContextRelation, bool) {
+func (c *ServerContext) HookRelation() (jujuc.ContextRelation, error) {
 	return c.Relation(c.relid)
 }
 
-func (c *ServerContext) RemoteUnitName() (string, bool) {
-	return c.remote, c.remote != ""
+func (c *ServerContext) RemoteUnitName() (string, error) {
+	if c.remote == "" {
+		return "", errgo.New("remote unit name not specified")
+	}
+	return c.remote, nil
 }
 
-func (c *ServerContext) Relation(id int) (jujuc.ContextRelation, bool) {
+func (c *ServerContext) Relation(id int) (jujuc.ContextRelation, error) {
 	r, found := c.rels[id]
-	return r, found
+	if !found {
+		return nil, errgo.New("not found")
+	}
+	return r, nil
 }
 
-func (c *ServerContext) RelationIds() []int {
+func (c *ServerContext) RelationIds() ([]int, error) {
 	ids := []int{}
 	for id := range c.rels {
 		ids = append(ids, id)
 	}
-	return ids
+	return ids, nil
 }
 
 type ServerContextRelation struct {

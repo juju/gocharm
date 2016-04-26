@@ -8,11 +8,11 @@ import (
 	"strings"
 
 	"gopkg.in/errgo.v1"
-	"gopkg.in/juju/charm.v5/hooks"
+	"gopkg.in/juju/charm.v6-unstable/hooks"
 )
 
 const (
-	envUUID          = "JUJU_ENV_UUID"
+	envUUID          = "JUJU_MODEL_UUID"
 	envUnitName      = "JUJU_UNIT_NAME"
 	envCharmDir      = "CHARM_DIR"
 	envJujuContextId = "JUJU_CONTEXT_ID"
