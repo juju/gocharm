@@ -9,8 +9,8 @@ import (
 
 	"github.com/juju/names"
 	"gopkg.in/errgo.v1"
-	"gopkg.in/juju/charm.v5"
-	"gopkg.in/juju/charm.v5/hooks"
+	"gopkg.in/juju/charm.v6-unstable"
+	"gopkg.in/juju/charm.v6-unstable/hooks"
 )
 
 // ContextSetter is the type of a function that can
@@ -258,7 +258,6 @@ var hookNames = map[hooks.Kind]bool{
 	hooks.ConfigChanged:      true,
 	hooks.UpgradeCharm:       true,
 	hooks.Stop:               true,
-	hooks.ActionRequested:    true,
 	hooks.Action:             true,
 	hooks.CollectMetrics:     true,
 	hooks.MeterStatusChanged: true,

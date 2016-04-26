@@ -78,6 +78,12 @@ type jujucRequest struct {
 	Dir         string
 	CommandName string
 	Args        []string
+
+	// StdinSet indicates whether or not the client supplied stdin. This is
+	// necessary as Stdin will be nil if the client supplied stdin but it
+	// is empty.
+	StdinSet bool
+	Stdin    []byte
 }
 
 func isUnimplemented(errStr string) bool {

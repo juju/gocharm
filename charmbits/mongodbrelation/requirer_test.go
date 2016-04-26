@@ -49,7 +49,7 @@ func (*suite) TestHTTPService(c *gc.C) {
 	service.NewService = hooktest.NewServiceFunc(runner, nil)
 
 	// Put a record into the database.
-	session := jujutesting.MgoServer.MustDial()
+	session := jujutesting.MgoServer.MustDialDirect()
 	defer session.Close()
 	const dbVal = "something stored in the database"
 	err := testCollection(session).Insert(&mdoc{

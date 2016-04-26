@@ -10,7 +10,7 @@ import (
 	jc "github.com/juju/testing/checkers"
 	gc "gopkg.in/check.v1"
 	"gopkg.in/errgo.v1"
-	"gopkg.in/juju/charm.v5"
+	"gopkg.in/juju/charm.v6-unstable"
 
 	"github.com/juju/gocharm/hook"
 )
@@ -54,14 +54,14 @@ func (s *HookSuite) StartServer(c *gc.C, relid int, remote string) {
 	s.setenv("JUJU_CONTEXT_ID", "testcontext")
 	s.setenv("JUJU_AGENT_SOCKET", s.sockPath)
 	s.setenv("JUJU_UNIT_NAME", "local/55")
-	s.setenv("JUJU_ENV_UUID", "fff.fff.fff")
+	s.setenv("JUJU_MODEL_UUID", "fff.fff.fff")
 
 	charmDir := filepath.Join(c.MkDir(), "charmdir")
 	err = os.Mkdir(charmDir, 0777)
 	c.Assert(err, gc.IsNil)
 	s.setenv("CHARM_DIR", charmDir)
 
-	if r, found := s.srvCtxt.HookRelation(); found {
+	if r, err := s.srvCtxt.HookRelation(); err == nil {
 		remoteName, _ := s.srvCtxt.RemoteUnitName()
 		s.setenv("JUJU_RELATION", r.Name())
 		s.setenv("JUJU_RELATION_ID", r.FakeId())
