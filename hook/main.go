@@ -172,6 +172,9 @@ func RegisterMainHooks(r *Registry) {
 // populate the context, and the given registry to determine which
 // relations to fetch information for.
 //
+// The hookName argument holds the name of the hook
+// to invoke, and args holds any additional arguments.
+//
 // The given directory will be used to save persistent state.
 //
 // It also returns the persistent state associated with the context
@@ -179,16 +182,18 @@ func RegisterMainHooks(r *Registry) {
 //
 // The caller is responsible for calling Close on the returned
 // context.
-func NewContextFromEnvironment(r *Registry, stateDir string) (*Context, PersistentState, error) {
-	if len(os.Args) < 2 {
-		return nil, nil, usageError(r)
+func NewContextFromEnvironment(r *Registry, stateDir string, hookName string, args []string) (*Context, PersistentState, error) {
+	if hookName == "" {
+		return nil, nil, errgo.Newf("no hook name provided")
 	}
-	hookName := os.Args[1]
 	if strings.HasPrefix(hookName, "cmd-") {
 		return &Context{
 			RunCommandName: strings.TrimPrefix(hookName, "cmd-"),
-			RunCommandArgs: os.Args[2:],
+			RunCommandArgs: args,
 		}, nil, nil
+	}
+	if len(args) != 0 {
+		return nil, nil, errgo.Newf("unexpected extra arguments running hook %q", hookName)
 	}
 	vars := mustEnvVars
 	if os.Getenv(envRelationName) != "" {
@@ -201,9 +206,6 @@ func NewContextFromEnvironment(r *Registry, stateDir string) (*Context, Persiste
 		if os.Getenv(v) == "" {
 			return nil, nil, errgo.Newf("required environment variable %q not set", v)
 		}
-	}
-	if len(os.Args) != 2 {
-		return nil, nil, errgo.New("one argument required")
 	}
 	runner, err := newToolRunnerFromEnvironment()
 	if err != nil {

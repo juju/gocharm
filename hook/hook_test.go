@@ -78,9 +78,7 @@ func (s *HookSuite) SetUpTest(c *gc.C) {
 	}
 	c.Assert(s.savedVars, gc.HasLen, 0)
 	s.savedVars = make(map[string]string)
-	s.savedArgs = os.Args
 	s.stateDir = c.MkDir()
-	os.Args = nil
 }
 
 func (s *HookSuite) TearDownTest(c *gc.C) {
@@ -90,7 +88,6 @@ func (s *HookSuite) TearDownTest(c *gc.C) {
 		c.Assert(<-s.err, gc.IsNil)
 		s.server = nil
 	}
-	os.Args = s.savedArgs
 }
 
 func (s *HookSuite) resetEnv(c *gc.C) {
@@ -111,8 +108,7 @@ func (s *HookSuite) newContext(c *gc.C, args ...string) *hook.Context {
 	r := hook.NewRegistry()
 	registerDefaultRelations(r)
 
-	os.Args = append([]string{"runhook"}, args...)
-	ctxt, _, err := hook.NewContextFromEnvironment(r, s.stateDir)
+	ctxt, _, err := hook.NewContextFromEnvironment(r, s.stateDir, args[0], args[1:])
 	c.Assert(err, gc.IsNil)
 	return ctxt
 }
@@ -177,8 +173,7 @@ func (s *HookSuite) TestLocalState(c *gc.C) {
 			return nil
 		})
 		r.RegisterContext(nopContextSetter, &state)
-		os.Args = []string{"exe", "peer-relation-changed"}
-		ctxt, pstate, err := hook.NewContextFromEnvironment(r, s.stateDir)
+		ctxt, pstate, err := hook.NewContextFromEnvironment(r, s.stateDir, "peer-relation-changed", nil)
 		c.Assert(err, gc.IsNil)
 		defer ctxt.Close()
 		hcmd, err := hook.Main(r, ctxt, pstate)
@@ -586,9 +581,8 @@ func (s *HookSuite) TestMain(c *gc.C) {
 		c.Check(val, gc.Equals, "My Title")
 		return nil
 	})
-	os.Args = []string{"exe", "peer-relation-changed"}
 
-	ctxt, state, err := hook.NewContextFromEnvironment(r0, s.stateDir)
+	ctxt, state, err := hook.NewContextFromEnvironment(r0, s.stateDir, "peer-relation-changed", nil)
 	c.Assert(err, gc.IsNil)
 	defer ctxt.Close()
 
@@ -608,7 +602,7 @@ func (s *HookSuite) TestMain(c *gc.C) {
 		called1 = true
 		return nil
 	})
-	err = s.runMain(c, r1)
+	err = s.runMain(c, r1, "peer-relation-changed")
 	c.Assert(err, gc.IsNil)
 	c.Assert(called1, gc.Equals, true)
 }
@@ -626,14 +620,12 @@ func (s *HookSuite) TestWildcardHook(c *gc.C) {
 	register("config-changed")
 	register("peer0-relation-changed")
 	register("*")
-	os.Args = []string{"exe", "config-changed"}
-	err := s.runMain(c, r)
+	err := s.runMain(c, r, "config-changed")
 	c.Assert(err, gc.IsNil)
 	c.Assert(called, jc.DeepEquals, []string{"config-changed", "*"})
 
 	called = nil
-	os.Args = []string{"exe", "peer0-relation-changed"}
-	err = s.runMain(c, r)
+	err = s.runMain(c, r, "peer0-relation-changed")
 	c.Assert(err, gc.IsNil)
 	c.Assert(called, jc.DeepEquals, []string{"peer0-relation-changed", "*"})
 }
@@ -644,8 +636,7 @@ func (s *HookSuite) TestMainFailsWhenCannotSaveState(c *gc.C) {
 	var state int
 	r.RegisterContext(nopContextSetter, &state)
 	r.RegisterHook("peer-relation-changed", func() error { return nil })
-	os.Args = []string{"exe", "peer-relation-changed"}
-	ctxt, _, err := hook.NewContextFromEnvironment(r, s.stateDir)
+	ctxt, _, err := hook.NewContextFromEnvironment(r, s.stateDir, "peer-relation-changed", nil)
 	c.Assert(err, gc.IsNil)
 	defer ctxt.Close()
 	hcmd, err := hook.Main(r, ctxt, errorState{})
@@ -665,16 +656,8 @@ func (errorState) Save(name string, data []byte) error {
 
 func (s *HookSuite) TestNewContextFromEnvironmentUsage(c *gc.C) {
 	r := hook.NewRegistry()
-	r.RegisterCommand(nopCommand)
-	r.Clone("client").RegisterCommand(nopCommand)
-	r.RegisterHook("peer-relation-changed", func() error { return nil })
-	r.RegisterHook("config-changed", func() error { return nil })
-	os.Args = []string{"exe"}
-	_, _, err := hook.NewContextFromEnvironment(r, s.stateDir)
-	c.Assert(err, gc.ErrorMatches, `usage: runhook cmd-root \[arg\.\.\.]
-	\| runhook cmd-root\.client \[arg\.\.\.]
-	\| runhook config-changed
-	\| runhook peer-relation-changed`)
+	_, _, err := hook.NewContextFromEnvironment(r, s.stateDir, "", nil)
+	c.Assert(err, gc.ErrorMatches, `no hook name provided`)
 }
 
 func nopCommand([]string) (hook.Command, error) {
@@ -745,7 +728,6 @@ func (s *HookSuite) TestCommandCall(c *gc.C) {
 	})
 	// invoke install hook, so we can find out the
 	// reported command names.
-	os.Args = []string{"exe", "install"}
 	ctxt := &hook.Context{
 		HookName: "install",
 		Runner:   nopRunner{},
@@ -756,8 +738,7 @@ func (s *HookSuite) TestCommandCall(c *gc.C) {
 	c.Assert(cmdNames, gc.HasLen, 2)
 
 	for i, name := range cmdNames {
-		os.Args = []string{"exe", name, fmt.Sprint(i), "arg1", "arg2"}
-		ctxt, state, err := hook.NewContextFromEnvironment(r, s.stateDir)
+		ctxt, state, err := hook.NewContextFromEnvironment(r, s.stateDir, name, []string{fmt.Sprint(i), "arg1", "arg2"})
 		c.Assert(err, gc.IsNil)
 		hcmd, err := hook.Main(r, ctxt, state)
 		c.Assert(err, gc.IsNil)
@@ -795,7 +776,6 @@ func (s *HookSuite) TestLongRunningCommand(c *gc.C) {
 
 	// invoke install hook, so we can find out the
 	// reported command name.
-	os.Args = []string{"exe", "install"}
 	ctxt := &hook.Context{
 		HookName: "install",
 		Runner:   nopRunner{},
@@ -805,8 +785,7 @@ func (s *HookSuite) TestLongRunningCommand(c *gc.C) {
 	c.Assert(hcmd, gc.IsNil)
 	c.Assert(cmdName, gc.Not(gc.Equals), "")
 
-	os.Args = []string{"exe", cmdName}
-	ctxt, state, err := hook.NewContextFromEnvironment(r, s.stateDir)
+	ctxt, state, err := hook.NewContextFromEnvironment(r, s.stateDir, cmdName, nil)
 	c.Assert(err, gc.IsNil)
 	hcmd, err = hook.Main(r, ctxt, state)
 	c.Assert(err, gc.IsNil)
@@ -887,8 +866,8 @@ func (s memState) Load(name string) ([]byte, error) {
 
 // runMain runs hook.Main with a context created from the
 // environment.
-func (s *HookSuite) runMain(c *gc.C, r *hook.Registry) error {
-	ctxt, state, err := hook.NewContextFromEnvironment(r, s.stateDir)
+func (s *HookSuite) runMain(c *gc.C, r *hook.Registry, hookName string, args ...string) error {
+	ctxt, state, err := hook.NewContextFromEnvironment(r, s.stateDir, hookName, args)
 	c.Assert(err, gc.IsNil)
 	defer ctxt.Close()
 	hcmd, err := hook.Main(r, ctxt, state)
@@ -906,18 +885,15 @@ func (s *HookSuite) TestHierarchicalLocalState(c *gc.C) {
 
 	r := hook.NewRegistry()
 	registerLevel0(r)
-	os.Args = []string{"", "config-changed"}
 	for i := 0; i < 3; i++ {
-		err := s.runMain(c, r)
+		err := s.runMain(c, r, "config-changed")
 		c.Assert(err, gc.IsNil)
 	}
-	os.Args = []string{"", "peer-relation-changed"}
 	for i := 0; i < 2; i++ {
-		err := s.runMain(c, r)
+		err := s.runMain(c, r, "peer-relation-changed")
 		c.Assert(err, gc.IsNil)
 	}
-	os.Args = []string{"", "other-relation-changed"}
-	err := s.runMain(c, r)
+	err := s.runMain(c, r, "other-relation-changed")
 	c.Assert(err, gc.IsNil)
 
 	c.Assert(latestState, jc.DeepEquals, map[string]localState{
@@ -941,8 +917,7 @@ func (s *HookSuite) TestHookNotFound(c *gc.C) {
 	r := hook.NewRegistry()
 	r.RegisterHook("install", func() error { return nil })
 	r.RegisterHook("stop", func() error { return nil })
-	os.Args = []string{"exe", "peer-relation-changed"}
-	err := s.runMain(c, r)
+	err := s.runMain(c, r, "peer-relation-changed")
 	c.Assert(err, gc.ErrorMatches, `usage: runhook install
 	\| runhook stop`)
 }
@@ -964,8 +939,7 @@ func (s *HookSuite) BenchmarkHook(c *gc.C) {
 		})
 		r.RegisterHook("stop", func() error { return nil })
 		r.RegisterHook("*", func() error { return nil })
-		os.Args = []string{"exe", "peer0-relation-joined"}
-		ctxt, state, err := hook.NewContextFromEnvironment(r, s.stateDir)
+		ctxt, state, err := hook.NewContextFromEnvironment(r, s.stateDir, "peer0-relation-joined", nil)
 		c.Assert(err, gc.IsNil)
 		hcmd, err := hook.Main(r, ctxt, state)
 		c.Assert(hcmd, gc.IsNil)

@@ -43,6 +43,15 @@ type sharedRegistry struct {
 	config    map[string]charm.Option
 	contexts  []ContextSetter
 	state     []localState
+	charmInfo CharmInfo
+}
+
+// CharmInfo holds descriptive information associated with
+// a charm.
+type CharmInfo struct {
+	Name        string
+	Summary     string
+	Description string
 }
 
 type hookFunc struct {
@@ -66,8 +75,30 @@ func NewRegistry() *Registry {
 			commands:  make(map[string]func([]string) (Command, error)),
 			relations: make(map[string]charm.Relation),
 			config:    make(map[string]charm.Option),
+			charmInfo: CharmInfo{
+				Name: "anon",
+			},
 		},
 	}
+}
+
+// RegisterAsset registers a file to be included in the charm
+// directory. The given path should be relative to the root
+// of the charm directory.
+func (r *Registry) RegisterAsset(path string, content []byte) {
+	panic("unimplemented")
+}
+
+// SetCharmInfo sets the descriptive information associated with
+// the charm. This should be called at least once, otherwise
+// the charm will be named "anon".
+func (r *Registry) SetCharmInfo(info CharmInfo) {
+	r.charmInfo = info
+}
+
+// CharmInfo returns descriptive information about the charm.
+func (r *Registry) CharmInfo() CharmInfo {
+	return r.charmInfo
 }
 
 // Clone returns a sub-registry of r with the given name. This
