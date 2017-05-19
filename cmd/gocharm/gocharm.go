@@ -38,8 +38,11 @@ func main() {
 	r := hook.NewRegistry()
 	charm.RegisterHooks(r)
 	hook.RegisterMainHooks(r)
+	if len(os.Args) < 2 {
+		fatalf("hook name argument required")
+	}
 	// TODO would /etc/init be a better place for local state?		
-	ctxt, state, err := hook.NewContextFromEnvironment(r, "/var/lib/juju-localstate")
+	ctxt, state, err := hook.NewContextFromEnvironment(r, "/var/lib/juju-localstate", os.Args[1], os.Args[2:])
 	if err != nil {
 		fatalf("cannot create context: %v", err)
 	}
